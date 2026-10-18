@@ -200,6 +200,7 @@ export function TreasurerDashboard({
                                 defaultPeriodId={selected?.id ?? active?.id ?? null}
                                 today={today}
                                 trigger="Pay"
+                                triggerVariant="outline"
                                 triggerSize="sm"
                               />
                               <ChargeDialog
