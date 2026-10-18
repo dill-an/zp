@@ -10,7 +10,7 @@ import { markDone, markExcused, resetAssignment, verifyAllDone, verifyAssignment
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime, weekStartFor } from "@/lib/dates";
 import { displayName } from "@/lib/names";
-import { getLaborContext, getWeekGrid, listWeeks } from "@/lib/queries/labor";
+import { getLaborContext, getSanctionsForAssignments, getWeekGrid, listWeeks } from "@/lib/queries/labor";
 import { isSunday, isValidISODate, nextWeekStart, previousWeekStart } from "@/lib/queries/labor-logic";
 import { getSetting, SETTING_KEYS } from "@/lib/settings";
 import { cn } from "@/lib/utils";
@@ -38,6 +38,7 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
   const awaiting = rows.filter((a) => a.status === "done" && !a.verifiedAt);
   const verified = rows.filter((a) => a.status === "done" && a.verifiedAt);
   const open = rows.filter((a) => a.status === "assigned");
+  const sanctionsByAssignment = getSanctionsForAssignments(rows.filter((a) => a.status === "missed").map((a) => a.id));
 
   return (
     <>
@@ -109,13 +110,18 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
                       const a = s.assignment!;
                       const isVerified = a.status === "done" && !!a.verifiedAt;
                       return (
-                        <li key={a.id} className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between" data-assignment={a.id}>
+                        <li key={a.id} className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between" data-assignment={a.id} data-job={row.jobType.name} data-member={a.member.username}>
                           <div className="min-w-0 space-y-0.5">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-medium">{row.jobType.name}</span>
                               {row.slots.length > 1 ? <span className="text-xs text-muted">slot {s.slot}</span> : null}
                               <MemberLink member={a.member} short className="text-sm" />
                               <AssignmentStatePill state={a.state} />
+                              {sanctionsByAssignment.get(a.id) ? (
+                                <Link href={`/sanctions/${sanctionsByAssignment.get(a.id)!.id}`} className="text-xs text-danger underline" data-testid="sanction-link">
+                                  Sanction issued ({sanctionsByAssignment.get(a.id)!.status})
+                                </Link>
+                              ) : null}
                             </div>
                             <p className="text-xs text-muted">
                               {row.jobType.windowLabel ? `${row.jobType.windowLabel} · ` : ""}due {formatDate(row.dueDate, { weekday: true })}

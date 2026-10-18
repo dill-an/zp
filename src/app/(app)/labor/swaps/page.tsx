@@ -19,7 +19,7 @@ export const metadata = { title: "Swaps | Labor" };
 function SwapRow({ r, children }: { r: SwapRequestDetail; children?: React.ReactNode }) {
   const a = r.assignment;
   return (
-    <li className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between" data-swap={r.id}>
+    <li className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between" data-swap={r.id} data-job={a.jobType.name} data-week={a.weekStart}>
       <div className="min-w-0 space-y-0.5 text-sm">
         <div className="flex flex-wrap items-center gap-2">
           <Link href={`/labor/week/${a.weekStart}`} className="font-medium hover:underline">

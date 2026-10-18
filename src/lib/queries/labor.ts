@@ -8,6 +8,7 @@ import {
   jobTypes,
   laborWeeks,
   members,
+  sanctions,
   type AssignmentStatus,
   type ExcuseRequest,
   type JobSwapRequest,
@@ -468,6 +469,23 @@ export function listExcuseRequests(opts: { status?: ExcuseRequest["status"][]; m
     const member = people.get(r.memberId);
     if (!assignment || !member) continue;
     out.push({ ...r, assignment, member, reviewedBy: r.reviewedById != null ? (people.get(r.reviewedById) ?? null) : null });
+  }
+  return out;
+}
+
+/** Make-up sanctions issued for missed assignments, keyed by assignment id. */
+export function getSanctionsForAssignments(assignmentIds: number[]): Map<number, { id: number; status: string }> {
+  if (!assignmentIds.length) return new Map();
+  const rows = db
+    .select({ id: sanctions.id, status: sanctions.status, sourceRef: sanctions.sourceRef })
+    .from(sanctions)
+    .where(and(eq(sanctions.source, "missed_clean"), inArray(sanctions.sourceRef, assignmentIds.map(String))))
+    .orderBy(desc(sanctions.id))
+    .all();
+  const out = new Map<number, { id: number; status: string }>();
+  for (const r of rows) {
+    const key = Number(r.sourceRef);
+    if (!out.has(key)) out.set(key, { id: r.id, status: r.status });
   }
   return out;
 }

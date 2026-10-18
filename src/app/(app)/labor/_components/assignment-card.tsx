@@ -26,7 +26,7 @@ export function AssignmentCard({
   const tracked = a.state !== "not_tracked";
   const urgent = a.state === "overdue" || a.state === "due_today";
   return (
-    <li className={cn("flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 sm:flex-row sm:items-start sm:justify-between", urgent && "border-danger/40")}>
+    <li className={cn("flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 sm:flex-row sm:items-start sm:justify-between", urgent && "border-danger/40")} data-week={a.weekStart} data-job={a.jobType.name}>
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <Link href={`/labor/week/${a.weekStart}`} className="font-medium hover:underline">

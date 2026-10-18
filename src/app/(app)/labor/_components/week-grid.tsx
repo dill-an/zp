@@ -98,7 +98,7 @@ function GridGroupRows({
       {group.rows.map((row) => {
         const jt = row.jobType;
         return (
-          <tr key={jt.id} className="border-t border-border align-top">
+          <tr key={jt.id} className="border-t border-border align-top" data-job={jt.name}>
             <td className="px-2 py-2 sm:px-3">
               <div className="font-medium leading-tight">
                 {jt.name}
