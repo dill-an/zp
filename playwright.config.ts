@@ -24,7 +24,7 @@ export default defineConfig({
   webServer: externalBase
     ? undefined
     : {
-        command: `npm run db:reset:e2e && DATABASE_PATH=./data/e2e.db PORT=${port} node node_modules/next/dist/bin/next start -p ${port}`,
+        command: `npm run db:reset:e2e && DATABASE_PATH=./data/e2e.db node node_modules/next/dist/bin/next start -p ${port}`,
         url: `http://127.0.0.1:${port}/login`,
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,
