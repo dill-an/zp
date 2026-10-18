@@ -43,6 +43,11 @@ export const STATUS_TONES: Record<string, Tone> = {
   normal: "neutral",
   high: "warning",
   urgent: "danger",
+  // labor states
+  not_tracked: "neutral",
+  draft: "neutral",
+  upcoming: "info",
+  due_today: "warning",
   // generic
   pending: "warning",
   approved: "success",
