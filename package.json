@@ -1,0 +1,51 @@
+{
+  "name": "zp-house",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zeta Psi house management: roster, chairs and tasks, labor and cleans, dues, attendance, sanctions, events.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:reset": "rm -f data/zp.db data/zp.db-wal data/zp.db-shm && npm run db:migrate && npm run db:seed",
+    "setup": "npm run db:migrate && npm run db:seed",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "db:reset:e2e": "rm -f data/e2e.db data/e2e.db-wal data/e2e.db-shm && SEED_SKIP_PASSWORD_CHANGE=1 npm run db:migrate && SEED_SKIP_PASSWORD_CHANGE=1 npm run db:seed"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "drizzle-orm": "^0.45.4",
+    "lucide-react": "^1.59.0",
+    "next": "15.5.28",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "server-only": "^0.0.1",
+    "tailwind-merge": "^3.3.1",
+    "tailwindcss": "^4.3.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^9.39.0",
+    "eslint-config-next": "15.5.28",
+    "postcss": "^8.5.6",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  }
+}

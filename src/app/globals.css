@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f6f5f1;
+  --surface: #ffffff;
+  --surface-2: #f1efe9;
+  --border: #e3e0d8;
+  --text: #1c1b18;
+  --muted: #6b6760;
+  --primary: #8a6a12;
+  --primary-strong: #6f5408;
+  --primary-soft: #f6ecd0;
+  --on-primary: #ffffff;
+  --success: #1f7a4d;
+  --success-soft: #dcf3e6;
+  --warning: #a35b00;
+  --warning-soft: #fdebd2;
+  --danger: #b4232c;
+  --danger-soft: #fbe1e3;
+  --info: #1e5aa8;
+  --info-soft: #dfeaf9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15140f;
+    --surface: #1e1d17;
+    --surface-2: #26241d;
+    --border: #35332a;
+    --text: #f2efe7;
+    --muted: #a39e92;
+    --primary: #e3b64c;
+    --primary-strong: #f0c968;
+    --primary-soft: #3a2f12;
+    --on-primary: #1c1b18;
+    --success: #5fcf8e;
+    --success-soft: #16382a;
+    --warning: #f0a84a;
+    --warning-soft: #3d2a10;
+    --danger: #f07a82;
+    --danger-soft: #3f1b1e;
+    --info: #7fb0f5;
+    --info-soft: #182c47;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-soft: var(--primary-soft);
+  --color-on-primary: var(--on-primary);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Native form controls pick up the theme. */
+input, select, textarea, button {
+  font: inherit;
+  color: inherit;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
