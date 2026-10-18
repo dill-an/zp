@@ -8,6 +8,7 @@ import { groupByPledgeClass, listMembers } from "@/lib/queries/common";
 import { bodyParagraphs, relativeAge } from "@/lib/queries/community-logic";
 import { deleteMaintenanceRequest, setMaintenanceStatus } from "@/lib/actions/community";
 import { formatDateTime } from "@/lib/dates";
+import { humanize } from "@/lib/utils";
 import { Button, Card, CardContent, CardHeader, CardTitle, ConfirmButton, PageHeader, StatusPill } from "@/components/ui";
 import { MemberLink } from "@/components/member-link";
 import { MaintenanceForm } from "../report-form";
@@ -73,7 +74,7 @@ export default async function MaintenanceRequestPage({ params }: { params: Promi
       />
       <div className="mb-4 flex flex-wrap items-center gap-1.5" data-testid="request-status">
         <StatusPill status={r.status} />
-        <StatusPill status={r.priority} label={`${r.priority === "normal" ? "Normal" : r.priority.charAt(0).toUpperCase() + r.priority.slice(1)} priority`} />
+        <StatusPill status={r.priority} label={`${humanize(r.priority)} priority`} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

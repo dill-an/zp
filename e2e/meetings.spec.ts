@@ -6,9 +6,10 @@ import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
  * The shared dev box runs several dev servers at once, so timeouts are generous and navigation
  * retries when the dev server serves a half-written manifest (a transient 500).
  */
-test.setTimeout(300_000);
-test.use({ actionTimeout: 60_000, navigationTimeout: 120_000 });
-const expect = baseExpect.configure({ timeout: 60_000 });
+test.setTimeout(420_000);
+test.describe.configure({ retries: 1 });
+test.use({ actionTimeout: 90_000, navigationTimeout: 180_000 });
+const expect = baseExpect.configure({ timeout: 90_000 });
 
 async function go(page: Page, url: string) {
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -19,16 +20,23 @@ async function go(page: Page, url: string) {
   throw new Error(`Could not load ${url}`);
 }
 
-/** login() plus recovery: when the post-login page 500s, the session cookie is still set. */
+/** Is a session cookie in place? (/login redirects to /dashboard when logged in.) */
+async function isLoggedIn(page: Page): Promise<boolean> {
+  const res = await page.goto("/login", { waitUntil: "commit" }).catch(() => null);
+  return !!res && res.status() < 500 && !page.url().includes("/login");
+}
+
+/**
+ * login() from the shared helpers, plus recovery for a slow or flaky dev server: the helper gives the
+ * dashboard 5 seconds to render, which a loaded box can miss even though the session cookie is set.
+ */
 async function signIn(page: Page, user: { username: string; password: string }) {
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       await login(page, user);
       return;
     } catch {
-      const res = await page.goto("/meetings", { waitUntil: "load" }).catch(() => null);
-      if (res && res.status() < 400 && !page.url().includes("/login")) return;
-      if (page.url().includes("/dashboard")) return;
+      if (await isLoggedIn(page)) return;
     }
   }
   throw new Error(`Could not log in as ${user.username}`);

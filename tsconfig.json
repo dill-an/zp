@@ -39,7 +39,8 @@
     ".next-sanctions/types/**/*.ts",
     ".next-tasks/types/**/*.ts",
     ".next/types/**/*.ts",
-    "next-env.d.ts"
+    "next-env.d.ts",
+    ".next-dues/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

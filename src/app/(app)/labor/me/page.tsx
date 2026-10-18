@@ -34,7 +34,7 @@ export default async function MyLaborPage() {
   };
   const excusePending = (a: AssignmentDetail) => requests.excuses.some((r) => r.assignmentId === a.id);
 
-  const section = (title: string, items: AssignmentDetail[], empty: string, showWeek = false) => (
+  const section = (title: string, items: AssignmentDetail[], empty: string, showWeek = false, past = false) => (
     <section className="space-y-2">
       <h2 className="text-base font-semibold">
         {title} <span className="text-sm font-normal text-muted">({items.length})</span>
@@ -42,7 +42,7 @@ export default async function MyLaborPage() {
       {items.length ? (
         <ul className="space-y-2">
           {items.map((a) => (
-            <AssignmentCard key={a.id} a={a} brothers={brothers} pendingSwap={swapLabel(a)} pendingExcuse={excusePending(a)} showWeek={showWeek} />
+            <AssignmentCard key={a.id} a={a} brothers={brothers} pendingSwap={swapLabel(a)} pendingExcuse={excusePending(a)} showWeek={showWeek} past={past} />
           ))}
         </ul>
       ) : (
@@ -105,7 +105,7 @@ export default async function MyLaborPage() {
               </ul>
             </section>
           ) : null}
-          {section("History", history, "No earlier weeks.", true)}
+          {section("History", history, "No earlier weeks.", true, true)}
         </div>
       )}
     </>

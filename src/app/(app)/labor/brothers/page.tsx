@@ -126,7 +126,8 @@ function GridView({ matrix, viewerId }: { matrix: Matrix; viewerId: number }) {
                       {row.member.preferredName || row.member.firstName}
                     </Link>
                     <span className="truncate text-[11px] text-muted">
-                      {row.member.lastName} · {row.member.laborGroup}
+                      {(row.member.preferredName || row.member.firstName).includes(" ") ? "" : `${row.member.lastName} · `}
+                      {row.member.laborGroup}
                     </span>
                   </div>
                 </td>

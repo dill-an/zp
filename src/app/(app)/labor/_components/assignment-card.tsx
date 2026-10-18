@@ -15,15 +15,20 @@ export function AssignmentCard({
   pendingSwap,
   pendingExcuse,
   showWeek = false,
+  past = false,
 }: {
   a: AssignmentDetail;
   brothers: Pick[];
   pendingSwap?: string | null;
   pendingExcuse?: boolean;
   showWeek?: boolean;
+  /** Earlier week: still allows a late Mark done when tracked, but no swap or excuse requests. */
+  past?: boolean;
 }) {
   const open = a.status === "assigned";
   const tracked = a.state !== "not_tracked";
+  const canAct = open && tracked;
+  const canRequest = canAct && !past;
   const urgent = a.state === "overdue" || a.state === "due_today";
   return (
     <li className={cn("flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 sm:flex-row sm:items-start sm:justify-between", urgent && "border-danger/40")} data-week={a.weekStart} data-job={a.jobType.name}>
@@ -48,17 +53,15 @@ export function AssignmentCard({
         {a.notes ? <p className="text-xs text-muted whitespace-pre-line">{a.notes}</p> : null}
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
-        {open ? (
-          <>
-            <ActionForm action={markDone} hidden={{ assignmentId: a.id }}>
-              <SubmitButton size="sm" pendingText="Saving…">
-                Mark done
-              </SubmitButton>
-            </ActionForm>
-            {!pendingSwap ? <SwapDialog assignmentId={a.id} jobName={a.jobType.name} brothers={brothers} /> : null}
-            {!pendingExcuse ? <ExcuseDialog assignmentId={a.id} jobName={a.jobType.name} /> : null}
-          </>
+        {canAct ? (
+          <ActionForm action={markDone} hidden={{ assignmentId: a.id }}>
+            <SubmitButton size="sm" pendingText="Saving…">
+              Mark done
+            </SubmitButton>
+          </ActionForm>
         ) : null}
+        {canRequest && !pendingSwap ? <SwapDialog assignmentId={a.id} jobName={a.jobType.name} brothers={brothers} /> : null}
+        {canRequest && !pendingExcuse ? <ExcuseDialog assignmentId={a.id} jobName={a.jobType.name} /> : null}
         {a.status === "done" && !a.verifiedAt ? (
           <ActionForm action={undoDone} hidden={{ assignmentId: a.id }}>
             <SubmitButton size="sm" variant="outline" pendingText="Saving…">
