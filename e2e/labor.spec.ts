@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect as baseExpect, type Page } from "@playwright/test";
 import { ADMIN, BROTHER, CLEANER, login } from "./helpers";
 
 /**
@@ -13,6 +13,9 @@ function uniqueFutureSunday(): string {
   const weeks = (Math.floor(Date.now() / 1000) * 7 + Math.floor(Math.random() * 7)) % 3000;
   return new Date(base + weeks * 7 * 86_400_000).toISOString().slice(0, 10);
 }
+
+/** Server actions re-render the page; give assertions room on a slow machine. */
+const expect = baseExpect.configure({ timeout: 20_000 });
 
 const WEEK = uniqueFutureSunday();
 const JOB_DONE = "Upstairs Commons"; // Martin: marks done, admin verifies

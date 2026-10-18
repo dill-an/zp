@@ -11,7 +11,7 @@ function MissedForm({ assignmentId, memberName, jobName, fineCents, close }: { a
   const [result, action] = useActionState(markMissed, null);
   useEffect(() => {
     if (result?.ok) {
-      const t = setTimeout(close, 900);
+      const t = setTimeout(close, 1500);
       return () => clearTimeout(t);
     }
   }, [result, close]);

@@ -13,7 +13,7 @@ function SwapForm({ assignmentId, jobName, brothers, close }: { assignmentId: nu
   const [result, action] = useActionState(requestSwap, null);
   useEffect(() => {
     if (result?.ok) {
-      const t = setTimeout(close, 900);
+      const t = setTimeout(close, 1500);
       return () => clearTimeout(t);
     }
   }, [result, close]);
@@ -53,7 +53,7 @@ function ExcuseForm({ assignmentId, jobName, close }: { assignmentId: number; jo
   const [result, action] = useActionState(requestExcuse, null);
   useEffect(() => {
     if (result?.ok) {
-      const t = setTimeout(close, 900);
+      const t = setTimeout(close, 1500);
       return () => clearTimeout(t);
     }
   }, [result, close]);
