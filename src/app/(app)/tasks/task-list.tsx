@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { StatusPill } from "@/components/ui/status-pill";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
 import type { TaskListItem } from "@/lib/queries/tasks";
 import { isOpenStatus, splitTags } from "@/lib/queries/tasks-logic";
 import { cn } from "@/lib/utils";
-import { AssigneeList, ChairBadge, ChecklistCount, CompletedText, DueText, PriorityPill, RecurrenceText, TagList } from "./task-bits";
+import { AssigneeList, ChairBadge, ChecklistCount, CompletedText, DueText, PriorityPill, RecurrenceText, TagList, TaskStatusPill } from "./task-bits";
 import { QuickDoneButton } from "./quick-done-button";
 
 export type TaskListProps = {
@@ -81,7 +80,7 @@ function TaskRow({ task, canAct, variant, hideChair, now }: ItemProps) {
       </Td>
       <Td>{variant === "done" ? <CompletedText task={task} /> : <DueText task={task} now={now} />}</Td>
       <Td>
-        <StatusPill status={task.status} />
+        <TaskStatusPill status={task.status} />
       </Td>
       <Td className="text-right">{open && canAct ? <QuickDoneButton taskId={task.id} title={task.title} /> : null}</Td>
     </Tr>
@@ -96,7 +95,7 @@ function TaskCard({ task, canAct, variant, hideChair, now }: ItemProps) {
         <Link href={`/tasks/${task.id}`} className={cn("font-medium leading-snug hover:underline", !open && "text-muted")}>
           {task.title}
         </Link>
-        <StatusPill status={task.status} className="shrink-0" />
+        <TaskStatusPill status={task.status} className="shrink-0" />
       </div>
       <div className="mt-1.5">
         <Meta task={task} hideChair={hideChair} />

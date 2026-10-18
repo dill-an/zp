@@ -5,15 +5,15 @@ import { requireUser } from "@/lib/auth";
 import { formatDateTime } from "@/lib/dates";
 import { initials } from "@/lib/names";
 import { getTask, type TaskActivityEntry } from "@/lib/queries/tasks";
-import { RECURRENCE_LABELS, canActOnTask, canEditTask, checklistProgress, isOverdue, splitTags } from "@/lib/queries/tasks-logic";
+import { RECURRENCE_LABELS, TASK_STATUS_LABELS, canActOnTask, canEditTask, checklistProgress, isOverdue, splitTags } from "@/lib/queries/tasks-logic";
+import type { TaskStatus } from "@/db/schema";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusPill } from "@/components/ui/status-pill";
 import { MemberLink } from "@/components/member-link";
 import { humanize } from "@/lib/utils";
-import { AssigneeList, ChairBadge, DueText, PriorityPill, TagList } from "../task-bits";
+import { AssigneeList, ChairBadge, DueText, PriorityPill, TagList, TaskStatusPill } from "../task-bits";
 import { Checklist } from "./checklist";
 import { CommentForm } from "./comment-form";
 import { DeleteTaskButton } from "./delete-button";
@@ -68,7 +68,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
           <Card data-testid="task-status-card">
             <CardContent className="space-y-3 py-4">
               <div className="flex flex-wrap items-center gap-2">
-                <StatusPill status={task.status} className="text-sm" />
+                <TaskStatusPill status={task.status} className="text-sm" />
                 <PriorityPill priority={task.priority} />
                 {overdue ? <Badge tone="danger">Overdue</Badge> : null}
                 {isMine ? <Badge tone="info">Assigned to you</Badge> : null}
@@ -200,7 +200,7 @@ function PageHeaderBlock({
   back: string;
   backLabel: string;
   title: string;
-  status: string;
+  status: TaskStatus;
   overdue: boolean;
   actions: React.ReactNode;
 }) {
@@ -214,7 +214,7 @@ function PageHeaderBlock({
         </p>
         <h1 className="text-2xl font-semibold leading-tight">{title}</h1>
         <p className="mt-1 text-sm text-muted">
-          {humanize(status)}
+          {TASK_STATUS_LABELS[status]}
           {overdue ? <span className="font-semibold text-danger"> and overdue</span> : null}
         </p>
       </div>

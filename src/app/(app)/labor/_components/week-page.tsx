@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -97,7 +98,7 @@ export function WeekPage({ user, weekStart, manage }: { user: CurrentUser; weekS
             <p className="text-xs text-muted">Completion tracking started on {formatDate(ctx.trackingStart, { year: true })}; earlier weeks are shown for reference and are never overdue.</p>
           ) : null}
           <p className="text-xs text-muted">
-            Your own cells are highlighted. Mark a job done from here or from <a href="/labor/me" className="underline">My jobs</a>, where you can also request a swap or an excuse.
+            Your own cells are highlighted. Mark a job done from here or from <Link href="/labor/me" className="underline">My jobs</Link>, where you can also request a swap or an excuse.
           </p>
         </div>
       )}

@@ -18,6 +18,15 @@ export const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1,
 
 export const RECURRENCE_DAYS: Record<Exclude<TaskRecurrence, "none">, number> = { weekly: 7, biweekly: 14, monthly: 30 };
 
+/** Display labels; `humanize("todo")` would give "Todo". */
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: "To do",
+  in_progress: "In progress",
+  blocked: "Blocked",
+  done: "Done",
+  cancelled: "Cancelled",
+};
+
 export const RECURRENCE_LABELS: Record<TaskRecurrence, string> = {
   none: "Does not repeat",
   weekly: "Every week",

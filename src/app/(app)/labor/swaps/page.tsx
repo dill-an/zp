@@ -65,7 +65,7 @@ export default async function SwapsPage() {
   const manager = can(user, "labor.manage");
   const all = listSwapRequests();
   const mine = all.filter((r) => r.requestedById === user.id);
-  const forMe = all.filter((r) => r.targetMemberId === user.id && r.requestedById !== user.id && r.status === "pending");
+  const forMe = all.filter((r) => r.targetMemberId === user.id && r.requestedById !== user.id && (r.status === "pending" || r.status === "accepted"));
   const open = all.filter((r) => r.targetMemberId == null && r.status === "pending" && r.requestedById !== user.id);
   const pendingAll = all.filter((r) => r.status === "pending" || r.status === "accepted");
   const recent = all.filter((r) => r.status === "approved" || r.status === "declined" || r.status === "cancelled").slice(0, 20);
@@ -80,19 +80,26 @@ export default async function SwapsPage() {
         <div className="space-y-6">
           <Section
             title="Requests for me"
+            hint="Jobs other brothers asked you to take."
             items={forMe}
             render={(r) => (
               <SwapRow key={r.id} r={r}>
-                <ActionForm action={acceptSwap} hidden={{ swapId: r.id }}>
-                  <SubmitButton size="sm" pendingText="Saving…">
-                    Accept
-                  </SubmitButton>
-                </ActionForm>
-                <ActionForm action={declineSwap} hidden={{ swapId: r.id }}>
-                  <SubmitButton size="sm" variant="outline" pendingText="Saving…">
-                    Decline
-                  </SubmitButton>
-                </ActionForm>
+                {r.status === "pending" ? (
+                  <>
+                    <ActionForm action={acceptSwap} hidden={{ swapId: r.id }}>
+                      <SubmitButton size="sm" pendingText="Saving…">
+                        Accept
+                      </SubmitButton>
+                    </ActionForm>
+                    <ActionForm action={declineSwap} hidden={{ swapId: r.id }}>
+                      <SubmitButton size="sm" variant="outline" pendingText="Saving…">
+                        Decline
+                      </SubmitButton>
+                    </ActionForm>
+                  </>
+                ) : (
+                  <span className="text-xs text-muted">You accepted; a labor manager will confirm.</span>
+                )}
               </SwapRow>
             )}
           />

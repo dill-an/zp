@@ -52,7 +52,7 @@ const taskFormSchema = z.object({
   dueAt: z
     .string()
     .trim()
-    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "Pick a valid due date and time.")
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/, "Pick a valid due date and time.")
     .optional(),
   priority: z.enum(TASK_PRIORITIES).default("normal"),
   recurrence: z.enum(TASK_RECURRENCES).default("none"),

@@ -190,6 +190,7 @@ test("chair filter narrows every tab", async ({ page }) => {
 
   // Title search and the filter form.
   await page.goto("/tasks?tab=open");
+  await page.locator("details summary", { hasText: "Filters" }).click();
   await page.fill("input[name=q]", social);
   await page.click("details form button[type=submit]");
   await expect(page).toHaveURL(/q=/);

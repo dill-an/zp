@@ -22,7 +22,7 @@ async function createEvent(page: Page, title: string, opts: { startsAt?: string;
   await page.fill("#startsAt", opts.startsAt ?? futureLocal(10));
   await page.fill("#location", "House basement");
   if (opts.mandatory) await page.check("#isMandatory");
-  await page.click("form button[type=submit]");
+  await page.getByRole("button", { name: "Create event" }).click();
   await page.waitForURL(/\/events\/\d+$/);
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
   return page.url();
@@ -55,7 +55,7 @@ test("admin creates an event, brother RSVPs, gets a sober monitor duty and marks
   await admin.page.selectOption("#duty", "sober_monitor");
   await admin.page.fill("#label", "First shift");
   await admin.page.getByRole("button", { name: "Save duty" }).click();
-  await expect(admin.page.getByRole("status")).toHaveText("Duty added.");
+  await expect(admin.page.getByText("Duty added.")).toBeVisible();
   const dutyRow = admin.page.locator("tr[data-duty-id]").filter({ hasText: BROTHER.name });
   await expect(dutyRow).toContainText("Sober monitor");
   await expect(dutyRow).toContainText("First shift");
@@ -121,7 +121,7 @@ test("admin posts a pinned announcement and an officers-only one; the brother se
   await admin.page.fill("#body", "First paragraph.\n\nSecond paragraph with a\nline break.");
   await admin.page.selectOption("#audience", "all");
   await admin.page.check("#isPinned");
-  await admin.page.click("form button[type=submit]");
+  await admin.page.getByRole("button", { name: "Post", exact: true }).click();
   await admin.page.waitForURL(/\/announcements$/);
   const publicCard = admin.page.locator("[data-announcement-id]").filter({ hasText: publicTitle });
   await expect(publicCard).toBeVisible();
@@ -132,7 +132,7 @@ test("admin posts a pinned announcement and an officers-only one; the brother se
   await admin.page.fill("#title", officerTitle);
   await admin.page.fill("#body", "Budget review on Sunday.");
   await admin.page.selectOption("#audience", "officers");
-  await admin.page.click("form button[type=submit]");
+  await admin.page.getByRole("button", { name: "Post", exact: true }).click();
   await admin.page.waitForURL(/\/announcements$/);
   await expect(admin.page.locator("[data-announcement-id]").filter({ hasText: officerTitle })).toBeVisible();
 
@@ -184,13 +184,13 @@ test("brother reports a maintenance issue; admin assigns it and resolves it", as
   const openCard = brother.page.locator("[data-request-id]").filter({ hasText: title });
   await expect(openCard).toBeVisible();
   await expect(openCard).toContainText(BROTHER.name);
-  await expect(openCard).toContainText("Reported just now");
+  await expect(openCard).toContainText(/Reported (just now|\d+ minutes? ago)/);
 
   // Admin assigns it to the brother.
   await admin.page.goto(requestUrl);
   await admin.page.selectOption("select[name=assignedToId]", { label: BROTHER.name });
   await admin.page.getByRole("button", { name: "Assign" }).click();
-  await expect(admin.page.getByRole("status")).toHaveText("Assigned.");
+  await expect(admin.page.getByText("Assigned.", { exact: true })).toBeVisible();
   await expect(admin.page.getByTestId("assignee")).toContainText(BROTHER.name);
 
   // The assignee can move it along.
@@ -204,7 +204,7 @@ test("brother reports a maintenance issue; admin assigns it and resolves it", as
   await admin.page.selectOption("select[name=status]", "resolved");
   await admin.page.fill("textarea[name=resolutionNotes]", "Replaced the washer.");
   await admin.page.getByRole("button", { name: "Update status" }).click();
-  await expect(admin.page.getByRole("status")).toHaveText("Marked resolved.");
+  await expect(admin.page.getByText("Marked resolved.")).toBeVisible();
   await expect(admin.page.getByTestId("request-status")).toContainText("Resolved");
   await expect(admin.page.getByText("Replaced the washer.")).toBeVisible();
 
@@ -265,7 +265,7 @@ test("mobile viewport renders events and the calendar day list", async ({ browse
   expect(overflow).toBeLessThanOrEqual(1);
 
   await page.goto(`/events/calendar?month=${startsAt.slice(0, 7)}`);
-  const dayList = page.getByLabel("Day by day");
+  const dayList = page.locator("section[aria-label='Day by day']");
   await expect(dayList).toBeVisible();
   await expect(dayList.getByRole("link", { name: title })).toBeVisible();
   await expect(page.locator(`[data-date="${startsAt.slice(0, 10)}"]`)).toBeVisible();

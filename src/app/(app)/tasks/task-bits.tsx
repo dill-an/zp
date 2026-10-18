@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatDateTime } from "@/lib/dates";
 import { displayName, initials, shortName } from "@/lib/names";
-import { RECURRENCE_LABELS, dueLabel, formatDueCompact, isOverdue } from "@/lib/queries/tasks-logic";
+import { RECURRENCE_LABELS, TASK_STATUS_LABELS, dueLabel, formatDueCompact, isOverdue } from "@/lib/queries/tasks-logic";
 import type { TaskChair, TaskPerson } from "@/lib/queries/tasks";
 import type { TaskPriority, TaskRecurrence, TaskStatus } from "@/db/schema";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,11 @@ export function ChairBadge({ chair, className }: { chair: TaskChair | null; clas
       </Badge>
     </Link>
   );
+}
+
+/** Status pill with the module's labels ("To do" rather than "Todo"). */
+export function TaskStatusPill({ status, className }: { status: TaskStatus; className?: string }) {
+  return <StatusPill status={status} label={TASK_STATUS_LABELS[status]} className={className} />;
 }
 
 /** Priority pill, shown only when it matters (high or urgent). */
