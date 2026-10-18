@@ -5,7 +5,7 @@ export type Tone = "neutral" | "primary" | "success" | "warning" | "danger" | "i
 
 const tones: Record<Tone, string> = {
   neutral: "bg-surface-2 text-muted border-border",
-  primary: "bg-primary-soft text-primary-strong border-transparent",
+  primary: "bg-primary-soft text-primary border-transparent",
   success: "bg-success-soft text-success border-transparent",
   warning: "bg-warning-soft text-warning border-transparent",
   danger: "bg-danger-soft text-danger border-transparent",

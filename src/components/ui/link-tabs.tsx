@@ -16,7 +16,7 @@ export function LinkTabs({ tabs, active, className }: { tabs: LinkTab[]; active:
             aria-current={isActive ? "page" : undefined}
             className={cn(
               "-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium",
-              isActive ? "border-primary text-text" : "border-transparent text-muted hover:text-text",
+              isActive ? "border-primary text-primary" : "border-transparent text-muted hover:text-text",
             )}
           >
             {t.label}

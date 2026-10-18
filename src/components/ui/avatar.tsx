@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-const palette = ["bg-info-soft text-info", "bg-success-soft text-success", "bg-warning-soft text-warning", "bg-primary-soft text-primary-strong", "bg-danger-soft text-danger"];
+const palette = ["bg-info-soft text-info", "bg-success-soft text-success", "bg-warning-soft text-warning", "bg-primary-soft text-primary", "bg-danger-soft text-danger"];
 
 export function Avatar({ initials, seed, size = "md", className }: { initials: string; seed?: number | string; size?: "sm" | "md" | "lg"; className?: string }) {
   const idx = typeof seed === "number" ? seed : seed ? [...seed].reduce((a, c) => a + c.charCodeAt(0), 0) : 0;

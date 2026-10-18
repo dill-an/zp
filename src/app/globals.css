@@ -1,47 +1,28 @@
 @import "tailwindcss";
 
+/*
+ * ZP House theme: black, yellow, white.
+ * Black surfaces, white text, yellow for primary actions, active states and emphasis.
+ */
 :root {
-  --bg: #f6f5f1;
-  --surface: #ffffff;
-  --surface-2: #f1efe9;
-  --border: #e3e0d8;
-  --text: #1c1b18;
-  --muted: #6b6760;
-  --primary: #8a6a12;
-  --primary-strong: #6f5408;
-  --primary-soft: #f6ecd0;
-  --on-primary: #ffffff;
-  --success: #1f7a4d;
-  --success-soft: #dcf3e6;
-  --warning: #a35b00;
-  --warning-soft: #fdebd2;
-  --danger: #b4232c;
-  --danger-soft: #fbe1e3;
-  --info: #1e5aa8;
-  --info-soft: #dfeaf9;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #15140f;
-    --surface: #1e1d17;
-    --surface-2: #26241d;
-    --border: #35332a;
-    --text: #f2efe7;
-    --muted: #a39e92;
-    --primary: #e3b64c;
-    --primary-strong: #f0c968;
-    --primary-soft: #3a2f12;
-    --on-primary: #1c1b18;
-    --success: #5fcf8e;
-    --success-soft: #16382a;
-    --warning: #f0a84a;
-    --warning-soft: #3d2a10;
-    --danger: #f07a82;
-    --danger-soft: #3f1b1e;
-    --info: #7fb0f5;
-    --info-soft: #182c47;
-  }
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --surface-2: #1e1e1e;
+  --border: #2a2a2a;
+  --text: #ffffff;
+  --muted: #a1a1a1;
+  --primary: #ffd60a;
+  --primary-strong: #ffe14d;
+  --primary-soft: #2e2600;
+  --on-primary: #0a0a0a;
+  --success: #5ee38a;
+  --success-soft: #0f2a1a;
+  --warning: #ffb020;
+  --warning-soft: #332000;
+  --danger: #ff6b6b;
+  --danger-soft: #3a1414;
+  --info: #f2f2f2;
+  --info-soft: #262626;
 }
 
 @theme inline {
@@ -67,7 +48,8 @@
 }
 
 html {
-  color-scheme: light dark;
+  color-scheme: dark;
+  background: var(--bg);
 }
 
 body {
@@ -77,17 +59,38 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+::selection {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
 /* Native form controls pick up the theme. */
 input, select, textarea, button {
   font: inherit;
   color: inherit;
 }
 
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
+a {
+  text-underline-offset: 2px;
+}
+
 dialog::backdrop {
-  background: rgb(0 0 0 / 0.5);
+  background: rgb(0 0 0 / 0.7);
 }
 
 .table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Yellow accent rule used by the app shell and login card. */
+.accent-rule {
+  background: linear-gradient(90deg, var(--primary) 0%, var(--primary) 60%, transparent 100%);
+  height: 3px;
 }

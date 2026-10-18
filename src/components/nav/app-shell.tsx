@@ -65,7 +65,7 @@ export function AppShell({ user, chapterName, logoutAction, children }: { user: 
                     aria-current={active ? "page" : undefined}
                     className={cn(
                       "flex items-center gap-2.5 rounded-md px-2 py-2 text-sm font-medium",
-                      active ? "bg-primary-soft text-primary-strong" : "text-text hover:bg-surface-2",
+                      active ? "bg-primary-soft text-primary" : "text-text hover:bg-surface-2",
                     )}
                   >
                     <Icon className="h-4 w-4 shrink-0" />
@@ -101,9 +101,10 @@ export function AppShell({ user, chapterName, logoutAction, children }: { user: 
     <div className="flex min-h-screen">
       {/* Desktop sidebar */}
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface md:flex">
-        <div className="flex h-14 items-center gap-2 border-b border-border px-4">
-          <span className="flex h-7 w-7 items-center justify-center rounded bg-primary text-xs font-bold text-on-primary">ZΨ</span>
-          <span className="font-semibold">{chapterName}</span>
+        <div className="accent-rule" aria-hidden />
+        <div className="flex h-14 items-center gap-2.5 border-b border-border px-4">
+          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-black tracking-tight text-on-primary">ZΨ</span>
+          <span className="font-semibold tracking-tight">{chapterName}</span>
         </div>
         {nav}
         {userBlock}
@@ -114,8 +115,12 @@ export function AppShell({ user, chapterName, logoutAction, children }: { user: 
         <div className="fixed inset-0 z-40 md:hidden">
           <button type="button" className="absolute inset-0 bg-black/50" aria-label="Close menu" onClick={() => setOpen(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-surface shadow-xl">
+            <div className="accent-rule" aria-hidden />
             <div className="flex h-14 items-center justify-between border-b border-border px-4">
-              <span className="font-semibold">{chapterName}</span>
+              <span className="flex items-center gap-2.5 font-semibold tracking-tight">
+                <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-black text-on-primary">ZΨ</span>
+                {chapterName}
+              </span>
               <button type="button" onClick={() => setOpen(false)} aria-label="Close menu" className="rounded p-1.5 hover:bg-surface-2">
                 <X className="h-5 w-5" />
               </button>
@@ -127,13 +132,17 @@ export function AppShell({ user, chapterName, logoutAction, children }: { user: 
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-surface/95 px-4 backdrop-blur md:hidden">
-          <button type="button" onClick={() => setOpen(true)} aria-label="Open menu" className="rounded p-1.5 hover:bg-surface-2">
-            <Menu className="h-5 w-5" />
-          </button>
-          <Link href="/dashboard" className="font-semibold">
-            {chapterName}
-          </Link>
+        <header className="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur md:hidden">
+          <div className="accent-rule" aria-hidden />
+          <div className="flex h-14 items-center gap-3 px-4">
+            <button type="button" onClick={() => setOpen(true)} aria-label="Open menu" className="rounded p-1.5 hover:bg-surface-2">
+              <Menu className="h-5 w-5" />
+            </button>
+            <Link href="/dashboard" className="flex items-center gap-2 font-semibold tracking-tight">
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-black text-on-primary">ZΨ</span>
+              {chapterName}
+            </Link>
+          </div>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-5 sm:px-6">{children}</main>
       </div>
