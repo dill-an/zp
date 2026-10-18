@@ -20,6 +20,19 @@ async function go(page: Page, url: string) {
   throw new Error(`Could not load ${url}`);
 }
 
+/**
+ * The dev server on the shared box recompiles every second (seven dev servers watch each other's
+ * dist dirs), and the HMR client turns each rebuild into hot-update fetches plus a server-component
+ * refresh until the tab runs out of memory. Muting the HMR socket keeps the tab stable; against a
+ * production server the route never matches.
+ */
+const muted = new WeakSet<Page>();
+async function quietHmr(page: Page) {
+  if (muted.has(page)) return;
+  muted.add(page);
+  await page.routeWebSocket(/_next\/webpack-hmr/, () => {});
+}
+
 /** Is a session cookie in place? (/login redirects to /dashboard when logged in.) */
 async function isLoggedIn(page: Page): Promise<boolean> {
   const res = await page.goto("/login", { waitUntil: "commit" }).catch(() => null);
@@ -31,6 +44,7 @@ async function isLoggedIn(page: Page): Promise<boolean> {
  * dashboard 5 seconds to render, which a loaded box can miss even though the session cookie is set.
  */
 async function signIn(page: Page, user: { username: string; password: string }) {
+  await quietHmr(page);
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       await login(page, user);
