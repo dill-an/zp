@@ -59,6 +59,7 @@ export const STATUS_TONES: Record<string, Tone> = {
   proposed: "info",
   defaulted: "danger",
   paid: "success",
+  unpaid: "warning",
   overdue: "danger",
   partial: "warning",
   going: "success",
