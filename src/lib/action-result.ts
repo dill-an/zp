@@ -62,13 +62,23 @@ export function parseForm<T>(schema: ZodType<T>, formData: FormData): { data: T 
   const parsed = schema.safeParse(formToObject(formData));
   if (parsed.success) return { data: parsed.data };
   const fieldErrors: Record<string, string[]> = {};
-  for (const issue of parsed.error.issues) {
+  const issues = parsed.error.issues.map((issue) => ({
+    ...issue,
+    // Empty inputs arrive as undefined (see formToObject); say "required" instead of zod's type message.
+    message: /received undefined/i.test(issue.message) ? "This field is required." : issue.message,
+  }));
+  for (const issue of issues) {
     const key = issue.path.map(String).join(".") || "_";
     (fieldErrors[key] ??= []).push(issue.message);
   }
-  const first = parsed.error.issues[0];
-  const where = first?.path.length ? `${first.path.map(String).join(".")}: ` : "";
+  const first = issues[0];
+  const where = first?.path.length ? `${humanizeKey(first.path.map(String).join("."))}: ` : "";
   return { result: fail(`${where}${first?.message ?? "Invalid input."}`, fieldErrors, formValues(formData)) };
+}
+
+function humanizeKey(key: string): string {
+  const spaced = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_.]/g, " ").toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 /** Wrap an action body so thrown errors become ActionResult failures. */

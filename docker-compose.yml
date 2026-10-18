@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      SESSION_SECRET: change-me
+      SEED_DEFAULT_PASSWORD: zetapsi
+      APP_TIMEZONE: America/New_York
+    volumes:
+      - zp-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  zp-data:

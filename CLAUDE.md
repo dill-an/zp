@@ -29,6 +29,7 @@ Fraternity management app for Zeta Psi (MIT). Next.js 15 App Router, React 19, T
 ## Patterns
 - Pages are async server components. Read the user with `requireUser()`; gate officer-only pages with `requirePermission("...")`.
 - Server actions: `"use server"` file, zod schema, `parseForm`, permission check via `requirePermissionForAction` or an ownership check, mutate with `db`, `logAudit`, then `revalidatePath(...)` and return `ok("...")` / `fail("...")`. Wrap bodies in `runAction` so thrown errors become `fail`. Signature for forms: `(prev: ActionResult | null, formData: FormData) => Promise<ActionResult>` used with `useActionState`; for simple buttons use `action={async () => { "use server"; ... }}` or bind ids.
+- `formToObject` turns empty inputs into `undefined`, so optional fields are simply `.optional()`; a missing required field gets the message "This field is required." automatically. Use `z.coerce.number()` for numeric inputs and `parseDollarsToCents` for money.
 - React 19 resets a form's uncontrolled inputs after its action returns. On failure, return `fail(msg, fieldErrors, formValues(formData))` (`parseForm` already does this) and set `defaultValue={fieldValue(result, "name", existing)}` on inputs so users do not lose what they typed. Password fields are never echoed.
 - Client components only where interaction needs it (`useActionState`, dialogs, toggles). Keep them small and pass plain data.
 - Every list page must handle the empty case with `EmptyState`.
