@@ -9,6 +9,7 @@ export const SETTING_KEYS = {
   houseMeetingTime: "house_meeting_time",
   missedCleanFineCents: "missed_clean_fine_cents",
   missedMeetingFineCents: "missed_meeting_fine_cents",
+  sanctionsPolicy: "sanctions_policy",
 } as const;
 
 export const SETTING_DEFAULTS: Record<string, string> = {
