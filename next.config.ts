@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   output: "standalone",
   experimental: {
     serverActions: { bodySizeLimit: "2mb" },
+    // Keeps dev servers lean when several run on one machine.
+    webpackMemoryOptimizations: true,
+    preloadEntriesOnStart: false,
   },
 };
 
