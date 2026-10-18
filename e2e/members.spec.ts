@@ -4,13 +4,19 @@ import { ADMIN, BROTHER, CLEANER, login as rawLogin, logout, uniq } from "./help
 // Dev servers shared with other agents compile slowly; give each test room.
 test.setTimeout(240_000);
 
-/** Logs in, retrying once if the dev server returned a transient error page. */
+/**
+ * Logs in with the shared helper; if that fails (slow compile, or another module's dashboard
+ * erroring mid-edit), fall back to a login that only waits for the post-login redirect.
+ */
 async function login(page: Page, user: { username: string; password: string } = ADMIN) {
   try {
     await rawLogin(page, user);
   } catch {
-    await page.goto("/login").catch(() => {});
-    await rawLogin(page, user);
+    await page.goto("/login", { waitUntil: "commit" }).catch(() => {});
+    await page.fill("#username", user.username);
+    await page.fill("#password", user.password);
+    await page.click("form button[type=submit]");
+    await page.waitForURL(/\/dashboard/, { waitUntil: "commit" });
   }
 }
 

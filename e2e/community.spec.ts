@@ -8,10 +8,20 @@ type StorageState = Awaited<ReturnType<BrowserContext["storageState"]>>;
 /** Each account logs in once per run; later contexts reuse its session cookie. */
 const sessions = new Map<string, StorageState>();
 
+/**
+ * Against a dev server, Fast Refresh refetches the open page after every file change in the
+ * tree; that is noise for a test (and absent under `next start`), so the HMR socket is mocked.
+ */
+async function quietContext(browser: Browser, options: BrowserContextOptions = {}): Promise<BrowserContext> {
+  const context = await browser.newContext(options);
+  await context.routeWebSocket(/webpack-hmr|turbopack-hmr/, () => {});
+  return context;
+}
+
 async function sessionFor(browser: Browser, user: Account): Promise<StorageState> {
   let state = sessions.get(user.username);
   if (!state) {
-    const context = await browser.newContext();
+    const context = await quietContext(browser);
     const page = await context.newPage();
     await login(page, user);
     state = await context.storageState();
@@ -23,7 +33,7 @@ async function sessionFor(browser: Browser, user: Account): Promise<StorageState
 
 /** A browser context logged in as `user`, so two brothers can act in one test. */
 async function userPage(browser: Browser, user: Account, options: BrowserContextOptions = {}) {
-  const context = await browser.newContext({ ...options, storageState: await sessionFor(browser, user) });
+  const context = await quietContext(browser, { ...options, storageState: await sessionFor(browser, user) });
   const page = await context.newPage();
   return { page, close: () => context.close() };
 }
