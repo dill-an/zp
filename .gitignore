@@ -17,3 +17,4 @@ tsconfig.tsbuildinfo
 data/.dev-*
 tsconfig.*.json
 next-env.d.ts
+e2e/_*
