@@ -31,9 +31,15 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    ".next-community/types/**/*.ts",
+    ".next-labor/types/**/*.ts",
+    ".next-meetings/types/**/*.ts",
+    ".next-members/types/**/*.ts",
+    ".next-probe/types/**/*.ts",
+    ".next-sanctions/types/**/*.ts",
+    ".next-tasks/types/**/*.ts",
     ".next/types/**/*.ts",
-    "next-env.d.ts",
-    ".next-probe/types/**/*.ts"
+    "next-env.d.ts"
   ],
   "exclude": [
     "node_modules",

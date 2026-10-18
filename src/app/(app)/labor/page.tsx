@@ -1,13 +1,11 @@
-import { PageHeader } from "@/components/ui/page-header";
-import { EmptyState } from "@/components/ui/empty-state";
+import { requireUser } from "@/lib/auth";
+import { currentWeekStart } from "@/lib/dates";
+import { WeekPage } from "./_components/week-page";
 
 export const metadata = { title: "Labor" };
 
-export default function LaborPage() {
-  return (
-    <>
-      <PageHeader title="Labor" />
-      <EmptyState title="Coming soon" description="This section is being built." />
-    </>
-  );
+export default async function LaborPage({ searchParams }: { searchParams: Promise<{ manage?: string }> }) {
+  const user = await requireUser();
+  const { manage } = await searchParams;
+  return <WeekPage user={user} weekStart={currentWeekStart()} manage={manage === "1"} />;
 }
