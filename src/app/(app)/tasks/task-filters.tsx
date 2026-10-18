@@ -6,6 +6,7 @@ import { Input, Select } from "@/components/ui/form";
 import { MemberSelect } from "@/components/member-select";
 import { humanize } from "@/lib/utils";
 import type { TaskPerson } from "@/lib/queries/tasks";
+import { TASK_STATUS_LABELS } from "@/lib/queries/tasks-logic";
 import type { ParsedFilters } from "./filters";
 
 export type FilterChair = { id: number; name: string };
@@ -56,13 +57,23 @@ export function TaskFilters({
           <MemberSelect name="assignee" groups={memberGroups} placeholder="Anyone" defaultValue={filters.assigneeId ?? ""} aria-label="Assignee" />
         )}
         <Select name="status" defaultValue={filters.status ?? ""} aria-label="Status">
-          <option value="">{tab === "done" ? "Done" : "Any open"}</option>
-          <option value="overdue">Overdue</option>
-          {TASK_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {humanize(s)}
-            </option>
-          ))}
+          {tab === "done" ? (
+            <>
+              <option value="">Done</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="closed">Done or cancelled</option>
+            </>
+          ) : (
+            <>
+              <option value="">Any open</option>
+              <option value="overdue">Overdue</option>
+              {TASK_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {TASK_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </>
+          )}
         </Select>
         <Select name="priority" defaultValue={filters.priority ?? ""} aria-label="Priority">
           <option value="">Any priority</option>

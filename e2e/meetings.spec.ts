@@ -6,10 +6,8 @@ import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
  * The shared dev box runs several dev servers at once, so timeouts are generous and navigation
  * retries when the dev server serves a half-written manifest (a transient 500).
  */
-test.setTimeout(420_000);
-test.describe.configure({ retries: 2 });
-test.use({ actionTimeout: 90_000, navigationTimeout: 180_000 });
-const expect = baseExpect.configure({ timeout: 90_000 });
+test.use({ actionTimeout: 60_000, navigationTimeout: 120_000 });
+const expect = baseExpect.configure({ timeout: 60_000 });
 
 async function go(page: Page, url: string) {
   for (let attempt = 0; attempt < 5; attempt++) {

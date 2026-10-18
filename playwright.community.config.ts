@@ -4,8 +4,10 @@
 import { defineConfig } from "@playwright/test";
 import fs from "node:fs";
 
+// The headless shell is a much smaller binary than full Chromium; every megabyte matters in the shared cgroup.
+const headlessShell = "/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell";
 const sandboxChromium = "/opt/pw-browsers/chromium";
-const executablePath = process.env.PW_CHROMIUM ?? (fs.existsSync(sandboxChromium) ? sandboxChromium : undefined);
+const executablePath = process.env.PW_CHROMIUM ?? (fs.existsSync(headlessShell) ? headlessShell : fs.existsSync(sandboxChromium) ? sandboxChromium : undefined);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -25,7 +27,7 @@ export default defineConfig({
     },
     navigationTimeout: 180_000,
     actionTimeout: 120_000,
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    trace: "off",
+    screenshot: "off",
   },
 });

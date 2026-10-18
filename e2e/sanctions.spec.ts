@@ -5,7 +5,7 @@ import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
  * Sanctions module. Tests run in order and share the records they create
  * (every reason is unique so reruns never collide with earlier data).
  */
-test.describe.configure({ mode: "serial", timeout: 120_000 });
+test.describe.configure({ mode: "serial" });
 
 test.beforeEach(async ({ page }) => {
   // Against a dev server, hot-reload pushes would reload pages mid-test; a production server has no such socket.

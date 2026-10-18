@@ -101,6 +101,11 @@ function commonFilters(f: ParsedFilters) {
   return { chairId: f.chairId, priority: f.priority, q: f.q };
 }
 
+/** A status filter that selects finished tasks, so rows should show who finished them instead of the due date. */
+function isClosedFilter(f: ParsedFilters): boolean {
+  return f.status === "done" || f.status === "cancelled" || f.status === "closed";
+}
+
 function MineTab({ user, filters, now, actionable }: TabProps & { user: { id: number } }) {
   const open = listTasks({ ...commonFilters(filters), assigneeId: user.id, status: filters.status ?? "open" }, now);
   const showRecent = !filters.status;
@@ -119,7 +124,7 @@ function MineTab({ user, filters, now, actionable }: TabProps & { user: { id: nu
       ) : null}
       {open.length === 0 ? (
         <EmptyState
-          title={filters.active ? "No tasks match these filters." : "Nothing on your plate."}
+          title={filters.active ? "No tasks match these filters" : "Nothing on your plate"}
           description={filters.active ? "Try clearing a filter." : "Tasks assigned to you by a chair, or that you create for yourself, show up here."}
           action={
             <ButtonLink href="/tasks/new" variant="secondary" size="sm">
@@ -128,7 +133,7 @@ function MineTab({ user, filters, now, actionable }: TabProps & { user: { id: nu
           }
         />
       ) : (
-        <TaskList tasks={open} actionableIds={actionable(open)} now={now} />
+        <TaskList tasks={open} actionableIds={actionable(open)} variant={isClosedFilter(filters) ? "done" : "open"} now={now} />
       )}
       {recent.length > 0 ? (
         <section>
@@ -145,8 +150,7 @@ function OpenTab({ filters, now, actionable }: TabProps) {
   if (list.length === 0) {
     return <EmptyState title="No open tasks" description={filters.active ? "Nothing matches these filters." : "Every task is done. Enjoy it while it lasts."} />;
   }
-  const variant = filters.status === "done" || filters.status === "cancelled" || filters.status === "closed" ? "done" : "open";
-  return <TaskList tasks={list} actionableIds={actionable(list)} variant={variant} now={now} />;
+  return <TaskList tasks={list} actionableIds={actionable(list)} variant={isClosedFilter(filters) ? "done" : "open"} now={now} />;
 }
 
 function DoneTab({ filters, now, actionable }: TabProps) {
@@ -167,7 +171,7 @@ function ByChairTab({ user, filters, now, actionable, chairs }: TabProps & { use
   const byChair = new Map<number | null, TaskListItem[]>();
   for (const t of list) (byChair.get(t.chairId) ?? byChair.set(t.chairId, []).get(t.chairId)!).push(t);
   const ids = actionable(list);
-  const variant = filters.status === "done" || filters.status === "cancelled" || filters.status === "closed" ? "done" : "open";
+  const variant = isClosedFilter(filters) ? "done" : "open";
 
   const groups: { key: string; chairId: number | null; chair: ChairSummary | null; tasks: TaskListItem[] }[] = chairs
     .filter((c) => filters.chairId === undefined || filters.chairId === c.id)
