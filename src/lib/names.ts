@@ -10,6 +10,8 @@ export function fullName(m: NameFields): string {
 export function displayName(m: NameFields): string {
   const first = m.preferredName || m.firstName;
   if (first.includes(" ")) return first; // e.g. "David Coll"
+  // A brother known by his last name ("Santana") gets his full name instead of "Santana Santana".
+  if (first.toLowerCase() === m.lastName.toLowerCase()) return `${m.firstName} ${m.lastName}`.trim();
   return `${first} ${m.lastName}`.trim();
 }
 

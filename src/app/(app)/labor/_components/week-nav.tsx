@@ -27,11 +27,11 @@ export function WeekNav({ weekStart, weeks, currentWeekStart, manage }: { weekSt
         aria-label="Pick a week"
         value={weekStart}
         onChange={(e) => router.push(href(e.target.value))}
-        className="h-8 rounded-md border border-border bg-surface px-2 text-sm"
+        className="h-8 min-w-0 max-w-full flex-1 rounded-md border border-border bg-surface px-2 text-sm sm:flex-none"
       >
         {options.map((w) => (
           <option key={w.weekStart} value={w.weekStart}>
-            Week of {formatDate(w.weekStart, { year: true })}
+            {formatDate(w.weekStart, { year: true })}
             {w.weekStart === currentWeekStart ? " (this week)" : ""}
             {!weeks.some((x) => x.weekStart === w.weekStart) ? " (not created)" : w.isPublished ? "" : " (draft)"}
           </option>
