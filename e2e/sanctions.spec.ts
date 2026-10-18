@@ -36,7 +36,8 @@ async function issue(page: Page, opts: { member: string; reason: string; fine?: 
   await page.fill("#fineDollars", opts.fine ?? "");
   if (opts.source) await page.selectOption("#source", opts.source);
   if (opts.due !== undefined) await page.fill("#dueAt", opts.due);
-  await page.click("form button[type=submit]");
+  // Scope to main: the app shell's logout form comes first in the DOM.
+  await page.click("main form button[type=submit]");
   await page.waitForURL(/\/sanctions\/\d+$/);
   return page.url().match(/\/sanctions\/(\d+)$/)![1];
 }
@@ -187,7 +188,7 @@ test("policy edit saves and brothers can read it", async ({ page }) => {
   await page.goto("/sanctions/policy");
   const marker = uniq("Policy");
   await page.fill("#policy", `${marker} first paragraph.\n\nSecond paragraph of the policy.`);
-  await page.click("form button[type=submit]");
+  await page.getByRole("button", { name: "Save policy" }).click();
   await expect(page.locator("p[role=status]")).toHaveText("Policy saved.");
   await expect(page.locator("#policy-text p").first()).toContainText(`${marker} first paragraph.`);
   await expect(page.locator("#policy-text p")).toHaveCount(2);

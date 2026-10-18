@@ -21,7 +21,7 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:3107",
     launchOptions: {
       ...(executablePath ? { executablePath } : {}),
-      args: ["--single-process", "--no-zygote", "--renderer-process-limit=1", "--js-flags=--max-old-space-size=256", "--disable-gpu"],
+      args: ["--no-zygote", "--renderer-process-limit=1", "--js-flags=--max-old-space-size=256", "--disable-gpu", "--disable-dev-shm-usage"],
     },
     navigationTimeout: 180_000,
     actionTimeout: 120_000,
