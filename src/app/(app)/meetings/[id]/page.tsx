@@ -30,7 +30,8 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
   const groups = meeting.attendanceTaken ? getMeetingAttendance(meeting.id) : [];
   const mine = groups.flatMap((g) => g.rows).find((r) => r.memberId === user.id) ?? null;
   const myExcuse = getMyExcuseForMeeting(user.id, meeting.id);
-  const canRequest = (upcoming || mine?.status === "absent") && myExcuse?.status !== "pending" && myExcuse?.status !== "approved";
+  const eligible = upcoming || mine?.status === "absent";
+  const canRequest = eligible && myExcuse?.status !== "pending" && myExcuse?.status !== "approved";
   const finePreview = manage && meeting.attendanceTaken ? getFinePreview(meeting) : null;
   const sanctionPreview = manage && meeting.attendanceTaken ? getSanctionPreview(meeting) : null;
   const agenda = splitParagraphs(meeting.agenda);
@@ -58,7 +59,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
         }
         actions={
           <>
-            {canRequest ? <ExcuseDialog meetingId={meeting.id} meetingLabel={label} /> : null}
+            {eligible ? <ExcuseDialog meetingId={meeting.id} meetingLabel={label} canRequest={canRequest} /> : null}
             {manage ? (
               <>
                 <ButtonLink variant="ghost" size="sm" href={`/meetings/${meeting.id}/edit`}>

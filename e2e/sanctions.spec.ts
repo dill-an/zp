@@ -26,6 +26,17 @@ async function switchUser(page: Page, user: { username: string; password: string
   await login(page, user);
 }
 
+/**
+ * Wait until React has hydrated the form. Before that a submit is a plain page POST, which never
+ * triggers the client-side form reset the retry tests below cover.
+ */
+async function waitForHydration(page: Page) {
+  await page.waitForFunction(() => {
+    const form = document.querySelector("main form");
+    return !!form && Object.keys(form).some((k) => k.startsWith("__reactFiber"));
+  });
+}
+
 async function issue(page: Page, opts: { member: string; reason: string; fine?: string; job?: string; hours?: string; source?: string; due?: string }): Promise<string> {
   await page.goto("/sanctions/new");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Issue a sanction");
@@ -100,7 +111,12 @@ test("Gio sees it under My sanctions with the fine and due date, starts and comp
   await page.goto(`/sanctions/${sanction1}`);
   await expect(page.locator("main").getByText("Started", { exact: false }).first()).toBeVisible();
   await expect(page.locator("main").getByText("Marked completed").first()).toBeVisible();
-  await expect(page.locator("main").getByRole("link", { name: "$25.00" })).toHaveAttribute("href", "/dues");
+  // The fine links to his own ledger page (which admits the brother himself), not just /dues.
+  const fineLink = page.locator("main").getByRole("link", { name: "$25.00" });
+  await expect(fineLink).toHaveAttribute("href", /^\/dues\/members\/\d+$/);
+  await expect(page.locator("main").getByRole("link", { name: "See my dues" })).toHaveAttribute("href", /^\/dues\/members\/\d+$/);
+  await fineLink.click();
+  await expect(page).toHaveURL(/\/dues\/members\/\d+$/);
 });
 
 test("admin sees it under To verify and verifies it", async ({ page }) => {
@@ -217,4 +233,88 @@ test("mobile viewport renders the list for a brother and the board for a manager
   await expect(page.locator(`tr[data-sanction-id="${sanction1}"]`)).toBeHidden();
   const boardOverflows = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
   expect(boardOverflows).toBe(false);
+});
+
+test("a failed submit keeps the chosen brother and source, so the corrected resubmit stores them", async ({ page }) => {
+  await login(page, ADMIN);
+  await page.goto("/sanctions/new");
+  await waitForHydration(page);
+  const reason = uniq("Retry");
+  await page.selectOption("#memberId", { label: BROTHER.name });
+  await page.selectOption("#source", "conduct");
+  await page.fill("#reason", reason);
+  await page.fill("#fineDollars", "abc");
+  await page.click("main form button[type=submit]");
+  const alert = page.locator("main p[role=alert]");
+  await expect(alert).toHaveText("Fine dollars: Enter a dollar amount like 25 or 12.50.");
+  // React resets the form after the action returns; the selects must still show what was picked.
+  await expect(page.locator("#memberId option:checked")).toHaveText(BROTHER.name);
+  await expect(page.locator("#source")).toHaveValue("conduct");
+  await expect(page.locator("#reason")).toHaveValue(reason);
+  await expect(page.locator("#fineDollars")).toHaveValue("abc");
+
+  await page.fill("#fineDollars", "5");
+  await page.click("main form button[type=submit]");
+  await page.waitForURL(/\/sanctions\/\d+$/);
+  const main = page.locator("main");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(reason);
+  await expect(main.getByText(BROTHER.name).first()).toBeVisible();
+  await expect(main.getByText("Conduct", { exact: true })).toBeVisible();
+  await expect(main.getByText("$5.00").first()).toBeVisible();
+
+  // Same on the edit page: a changed source survives a failed save.
+  await main.getByRole("link", { name: "Edit" }).click();
+  await page.waitForURL(/\/sanctions\/\d+\/edit$/);
+  await waitForHydration(page);
+  await page.selectOption("#source", "late_dues");
+  await page.fill("#fineDollars", "zzz");
+  await page.click("main form button[type=submit]");
+  await expect(alert).toHaveText("Fine dollars: Enter a dollar amount like 25 or 12.50.");
+  await expect(page.locator("#source")).toHaveValue("late_dues");
+  await page.fill("#fineDollars", "7.50");
+  await page.click("main form button[type=submit]");
+  await page.waitForURL(/\/sanctions\/\d+$/);
+  await expect(main.getByText("Late dues", { exact: true })).toBeVisible();
+  await expect(main.getByText("$7.50").first()).toBeVisible();
+});
+
+test("a failed multi-brother submit keeps the toggle and the checked brothers", async ({ page }) => {
+  await login(page, ADMIN);
+  await page.goto("/sanctions/new");
+  await waitForHydration(page);
+  const reason = uniq("Multi");
+  const toggle = page.getByLabel("Apply to several brothers");
+  await toggle.check();
+  await page.getByLabel(BROTHER.name, { exact: true }).check();
+  await page.getByLabel(CLEANER.name, { exact: true }).check();
+  await page.fill("#reason", reason);
+  await page.fill("#fineDollars", "zzz");
+  await page.click("main form button[type=submit]");
+  await expect(page.locator("main p[role=alert]")).toHaveText("Fine dollars: Enter a dollar amount like 25 or 12.50.");
+  await expect(toggle).toBeChecked();
+  await expect(page.getByLabel(BROTHER.name, { exact: true })).toBeChecked();
+  await expect(page.getByLabel(CLEANER.name, { exact: true })).toBeChecked();
+  await expect(page.locator("main input[name='memberIds[]']:checked")).toHaveCount(2);
+  await expect(page.locator("main form button[type=submit]")).toHaveText("Issue to selected");
+
+  await page.fill("#fineDollars", "5");
+  await page.click("main form button[type=submit]");
+  await page.waitForURL(/\/sanctions\?issued=2$/);
+  await expect(page.locator("p[role=status]")).toHaveText("Issued 2 sanctions.");
+  await page.goto(`/sanctions?tab=open&q=${encodeURIComponent(reason)}`);
+  const rows = page.locator("tr[data-sanction-id]");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: BROTHER.name })).toHaveCount(1);
+  await expect(rows.filter({ hasText: CLEANER.name })).toHaveCount(1);
+  await expect(rows.filter({ hasText: "$5.00" })).toHaveCount(2);
+});
+
+test("Jobs tab groups punishment jobs and does not link the no-job group to an empty search", async ({ page }) => {
+  await login(page, ADMIN);
+  await page.goto("/sanctions?tab=jobs");
+  const main = page.locator("main");
+  // sanction1 and sanction3 have job descriptions; sanction4 (hours only) lands in the synthetic group.
+  await expect(main.getByRole("link", { name: "Deep clean the basement bathroom" }).first()).toBeVisible();
+  await expect(main.getByText("No job (fine or hours only)")).toBeVisible();
+  await expect(main.getByRole("link", { name: "No job (fine or hours only)" })).toHaveCount(0);
 });

@@ -21,6 +21,8 @@ export function ChairForm({ chair, cancelHref }: { chair: Chair | null; cancelHr
   const [slugTouched, setSlugTouched] = useState(false);
   const [slug, setSlug] = useState(v("slug", ""));
   const slugValue = slugTouched ? slug : chairSlugFromName(name);
+  // Keyed on the submitted value: React's post-action form reset does not re-apply a select's changed defaultValue.
+  const category = v("category", chair?.category ?? "internal");
 
   return (
     <form action={action} className="space-y-5">
@@ -60,7 +62,7 @@ export function ChairForm({ chair, cancelHref }: { chair: Chair | null; cancelHr
           </FormRow>
           <FormRow className="sm:grid-cols-3">
             <Field label="Category" htmlFor="category" error={errors("category")}>
-              <Select id="category" name="category" defaultValue={v("category", chair?.category ?? "internal")}>
+              <Select key={`cat-${category}`} id="category" name="category" defaultValue={category}>
                 {CHAIR_CATEGORIES.map((c) => (
                   <option key={c} value={c}>
                     {CHAIR_CATEGORY_LABELS[c]}

@@ -19,6 +19,12 @@ export function JobTypeForm({ jobType }: { jobType?: JobType | null }) {
     if (result && !result.ok && result.values) return key in result.values;
     return fallback;
   };
+  // Selects are keyed on the value they should show: React never re-applies a changed defaultValue to a
+  // <select>, so without a remount the post-action form reset would drop the submitted choice.
+  const kind = fieldValue(result, "kind", jobType?.kind ?? "clean");
+  const category = fieldValue(result, "category", jobType?.category ?? "other");
+  const start = fieldValue(result, "startOffsetDays", jobType?.startOffsetDays ?? 1);
+  const due = fieldValue(result, "dueOffsetDays", jobType?.dueOffsetDays ?? 7);
   return (
     <form action={action} className="space-y-4">
       {jobType ? <input type="hidden" name="id" value={jobType.id} /> : null}
@@ -32,7 +38,7 @@ export function JobTypeForm({ jobType }: { jobType?: JobType | null }) {
       </FormRow>
       <FormRow>
         <Field label="Kind" htmlFor="jt-kind" error={fe("kind")}>
-          <Select id="jt-kind" name="kind" defaultValue={fieldValue(result, "kind", jobType?.kind ?? "clean")}>
+          <Select key={kind} id="jt-kind" name="kind" defaultValue={kind}>
             {JOB_KINDS.map((k) => (
               <option key={k} value={k}>
                 {humanize(k)}
@@ -41,7 +47,7 @@ export function JobTypeForm({ jobType }: { jobType?: JobType | null }) {
           </Select>
         </Field>
         <Field label="Category" htmlFor="jt-category" error={fe("category")}>
-          <Select id="jt-category" name="category" defaultValue={fieldValue(result, "category", jobType?.category ?? "other")}>
+          <Select key={category} id="jt-category" name="category" defaultValue={category}>
             {JOB_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {humanize(c)}
@@ -52,7 +58,7 @@ export function JobTypeForm({ jobType }: { jobType?: JobType | null }) {
       </FormRow>
       <FormRow>
         <Field label="Can start" htmlFor="jt-start" hint="Days after the week's Sunday." error={fe("startOffsetDays")}>
-          <Select id="jt-start" name="startOffsetDays" defaultValue={fieldValue(result, "startOffsetDays", jobType?.startOffsetDays ?? 1)}>
+          <Select key={start} id="jt-start" name="startOffsetDays" defaultValue={start}>
             {DAYS.slice(0, 14).map((d, i) => (
               <option key={i} value={i}>
                 {d} (+{i})
@@ -61,7 +67,7 @@ export function JobTypeForm({ jobType }: { jobType?: JobType | null }) {
           </Select>
         </Field>
         <Field label="Due by" htmlFor="jt-due" hint="7 = the following Sunday." error={fe("dueOffsetDays")}>
-          <Select id="jt-due" name="dueOffsetDays" defaultValue={fieldValue(result, "dueOffsetDays", jobType?.dueOffsetDays ?? 7)}>
+          <Select key={due} id="jt-due" name="dueOffsetDays" defaultValue={due}>
             {DAYS.map((d, i) => (
               <option key={i} value={i}>
                 {d} (+{i})

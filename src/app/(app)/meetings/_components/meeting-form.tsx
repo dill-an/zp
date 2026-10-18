@@ -26,6 +26,8 @@ export function MeetingForm({ meeting, defaultScheduledAt, defaultLocation }: { 
   const bound = meeting ? updateMeeting.bind(null, meeting.id) : createMeeting;
   const [result, action] = useActionState(bound, null);
   const mandatoryDefault = result && !result.ok && result.values ? result.values.isMandatory === "on" : (meeting?.isMandatory ?? true);
+  // React applies a select's defaultValue only on mount, so the select is re-keyed by the value coming back from a failed submit.
+  const kind = fieldValue(result, "kind", meeting?.kind ?? "house");
   return (
     <form action={action} className="space-y-4">
       <Field label="Title" htmlFor="title" required error={fieldErrors(result, "title")}>
@@ -33,7 +35,7 @@ export function MeetingForm({ meeting, defaultScheduledAt, defaultLocation }: { 
       </Field>
       <FormRow>
         <Field label="Kind" htmlFor="kind" error={fieldErrors(result, "kind")}>
-          <Select id="kind" name="kind" defaultValue={fieldValue(result, "kind", meeting?.kind ?? "house")}>
+          <Select key={kind} id="kind" name="kind" defaultValue={kind}>
             {MEETING_KINDS.map((k) => (
               <option key={k} value={k}>
                 {MEETING_KIND_LABELS[k]}

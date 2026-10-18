@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table";
-import type { JobSummary } from "@/lib/queries/sanctions-logic";
+import { NO_JOB_LABEL, type JobSummary } from "@/lib/queries/sanctions-logic";
 import { describeDue } from "./format";
 import { STATUS_LABELS } from "./format";
 
@@ -24,9 +24,14 @@ export function JobsSummary({ jobs }: { jobs: JobSummary[] }) {
         {jobs.map((j) => (
           <Tr key={j.job}>
             <Td className="min-w-48 font-medium">
-              <Link href={`/sanctions?tab=all&q=${encodeURIComponent(j.job)}`} className="hover:underline">
-                {j.job}
-              </Link>
+              {j.job === NO_JOB_LABEL ? (
+                // Synthetic group: these sanctions have no job text, so the q= filter could not find them.
+                <span>{j.job}</span>
+              ) : (
+                <Link href={`/sanctions?tab=all&q=${encodeURIComponent(j.job)}`} className="hover:underline">
+                  {j.job}
+                </Link>
+              )}
               <span className="block text-xs text-muted">{j.total} issued</span>
             </Td>
             <Td className="text-right tabular-nums">{j.done}</Td>

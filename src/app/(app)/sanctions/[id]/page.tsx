@@ -45,7 +45,8 @@ export default async function SanctionDetailPage({ params }: { params: Promise<{
   const actions = allowedActions(s.status, { isOwner, isManager });
   const now = new Date();
   const due = describeDue(s.dueAt, now);
-  const ledgerHref = isManager ? `/dues/members/${s.memberId}` : "/dues";
+  // The ledger page admits the brother himself as well as dues managers.
+  const ledgerHref = `/dues/members/${s.memberId}`;
 
   const timeline: TimelineEntry[] = [{ key: "issued", label: "Issued", at: s.issuedAt, by: s.issuedBy }];
   for (const h of s.history) {

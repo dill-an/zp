@@ -50,8 +50,17 @@ export function MemberForm({ member, pledgeClasses, canManage, isAdmin, isSelf, 
   const usernameValue = usernameTouched ? username : suggested;
 
   const targetIsAdmin = member?.role === "admin";
+  /** A non-admin with members.manage may edit an admin's details but not their role or status. */
   const roleLocked = canManage && !isAdmin && targetIsAdmin;
   const roleOptions = isAdmin ? ["member", "officer", "admin"] : ["member", "officer"];
+
+  // After a failed action React resets the form; it re-applies a changed defaultValue to inputs but not to
+  // selects (and a controlled select's DOM is reset without React noticing), so each select is keyed on its
+  // submitted value and remounts with that option as the default before the reset runs.
+  const pledgeClassId = v("pledgeClassId", member?.pledgeClassId ?? "");
+  const status = v("status", member?.status ?? "active");
+  const laborGroup = v("laborGroup", member?.laborGroup ?? "none");
+  const role = v("role", member?.role ?? "member");
 
   return (
     <form action={action} className="space-y-5">
@@ -101,7 +110,7 @@ export function MemberForm({ member, pledgeClasses, canManage, isAdmin, isSelf, 
             ) : null}
             <FormRow className="sm:grid-cols-4">
               <Field label="Pledge class" htmlFor="pledgeClassId" error={errors("pledgeClassId")}>
-                <Select id="pledgeClassId" name="pledgeClassId" defaultValue={v("pledgeClassId", member?.pledgeClassId ?? "")}>
+                <Select key={`pc-${pledgeClassId}`} id="pledgeClassId" name="pledgeClassId" defaultValue={pledgeClassId}>
                   <option value="">None</option>
                   {pledgeClasses.map((pc) => (
                     <option key={pc.id} value={pc.id}>
@@ -110,8 +119,9 @@ export function MemberForm({ member, pledgeClasses, canManage, isAdmin, isSelf, 
                   ))}
                 </Select>
               </Field>
-              <Field label="Status" htmlFor="status" error={errors("status")}>
-                <Select id="status" name="status" defaultValue={v("status", member?.status ?? "active")}>
+              <Field label="Status" htmlFor="status" hint={roleLocked ? "Only an admin can change an admin's status." : undefined} error={errors("status")}>
+                {roleLocked ? <input type="hidden" name="status" value={status} /> : null}
+                <Select key={`st-${status}`} id="status" name="status" defaultValue={status} disabled={roleLocked}>
                   {MEMBER_STATUSES.map((s) => (
                     <option key={s} value={s}>
                       {STATUS_LABELS[s] ?? humanize(s)}
@@ -120,7 +130,7 @@ export function MemberForm({ member, pledgeClasses, canManage, isAdmin, isSelf, 
                 </Select>
               </Field>
               <Field label="Labor group" htmlFor="laborGroup" error={errors("laborGroup")}>
-                <Select id="laborGroup" name="laborGroup" defaultValue={v("laborGroup", member?.laborGroup ?? "none")}>
+                <Select key={`lg-${laborGroup}`} id="laborGroup" name="laborGroup" defaultValue={laborGroup}>
                   {LABOR_GROUPS.map((g) => (
                     <option key={g} value={g}>
                       {humanize(g)}
@@ -129,7 +139,7 @@ export function MemberForm({ member, pledgeClasses, canManage, isAdmin, isSelf, 
                 </Select>
               </Field>
               <Field label="Role" htmlFor="role" hint={roleLocked ? "Only an admin can change an admin's role." : isAdmin ? undefined : "Only admins can grant admin."} error={errors("role")}>
-                <Select id="role" name="role" defaultValue={v("role", member?.role ?? "member")} disabled={roleLocked || (isSelf && targetIsAdmin)}>
+                <Select key={`role-${role}`} id="role" name="role" defaultValue={role} disabled={roleLocked || (isSelf && targetIsAdmin)}>
                   {(targetIsAdmin && !roleOptions.includes("admin") ? [...roleOptions, "admin"] : roleOptions).map((r) => (
                     <option key={r} value={r}>
                       {humanize(r)}

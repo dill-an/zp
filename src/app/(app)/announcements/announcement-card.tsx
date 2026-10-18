@@ -1,6 +1,6 @@
-import { Badge, Button, ButtonLink, Card, CardContent, ConfirmButton } from "@/components/ui";
+import { Badge, ButtonLink, Card, CardContent, ConfirmButton, SubmitButton } from "@/components/ui";
 import { MemberLink } from "@/components/member-link";
-import { deleteAnnouncement, toggleAnnouncementPin } from "@/lib/actions/community";
+import { deleteAnnouncement, setAnnouncementPinned } from "@/lib/actions/community";
 import { audienceLabel, bodyParagraphs, relativeAge } from "@/lib/queries/community-logic";
 import type { AnnouncementRow } from "@/lib/queries/community";
 import { formatDate, formatDateTime } from "@/lib/dates";
@@ -39,12 +39,12 @@ export function AnnouncementCard({ announcement: a, canEdit }: { announcement: A
             <form
               action={async () => {
                 "use server";
-                await toggleAnnouncementPin(a.id);
+                await setAnnouncementPinned(a.id, !a.isPinned);
               }}
             >
-              <Button type="submit" variant="outline" size="sm">
+              <SubmitButton variant="outline" size="sm" pendingText={a.isPinned ? "Unpinning…" : "Pinning…"}>
                 {a.isPinned ? "Unpin" : "Pin"}
-              </Button>
+              </SubmitButton>
             </form>
             <ButtonLink href={`/announcements/${a.id}/edit`} variant="outline" size="sm">
               Edit

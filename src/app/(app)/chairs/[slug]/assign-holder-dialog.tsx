@@ -27,6 +27,8 @@ function AssignForm({
 }) {
   const [result, action] = useActionState(assignChairHolder, null as ActionResult | null);
   const errors = (key: string) => (result && !result.ok ? result.fieldErrors?.[key] : undefined);
+  // Keyed on the submitted value so the pick survives a failed submit (React's form reset does not re-apply a select's defaultValue).
+  const memberId = fieldValue(result, "memberId");
   useEffect(() => {
     if (result?.ok) {
       const t = setTimeout(close, 600);
@@ -37,7 +39,7 @@ function AssignForm({
     <form action={action} className="space-y-4">
       <input type="hidden" name="chairId" value={chairId} />
       <Field label="Brother" htmlFor="memberId" required error={errors("memberId")}>
-        <MemberSelect id="memberId" name="memberId" groups={groups} required defaultValue={fieldValue(result, "memberId")} />
+        <MemberSelect key={`m-${memberId}`} id="memberId" name="memberId" groups={groups} required defaultValue={memberId} />
       </Field>
       <FormRow>
         <Field label="Term starts" htmlFor="termStart" required error={errors("termStart")}>

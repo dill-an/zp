@@ -115,8 +115,9 @@ export function MyDues({ memberId }: { memberId: number }) {
         <PlanCard key={plan.id} plan={plan} manage={false} />
       ))}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+      {/* min-w-0: a grid item otherwise sizes to its table's min-content width and pushes the page wider than a phone. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>My charges</CardTitle>
             <CardDescription>Everything billed to you, newest first.</CardDescription>
@@ -155,7 +156,7 @@ export function MyDues({ memberId }: { memberId: number }) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>My payments</CardTitle>
             <CardDescription>Payments the treasurer has recorded.</CardDescription>

@@ -60,8 +60,9 @@ export function AssignmentCard({
             </SubmitButton>
           </ActionForm>
         ) : null}
-        {canRequest && !pendingSwap ? <SwapDialog assignmentId={a.id} jobName={a.jobType.name} brothers={brothers} /> : null}
-        {canRequest && !pendingExcuse ? <ExcuseDialog assignmentId={a.id} jobName={a.jobType.name} /> : null}
+        {/* Stay mounted once a request is pending (trigger hidden) so the open dialog can show its confirmation and close itself. */}
+        {canRequest ? <SwapDialog assignmentId={a.id} jobName={a.jobType.name} brothers={brothers} hidden={!!pendingSwap} /> : null}
+        {canRequest ? <ExcuseDialog assignmentId={a.id} jobName={a.jobType.name} hidden={!!pendingExcuse} /> : null}
         {a.status === "done" && !a.verifiedAt ? (
           <ActionForm action={undoDone} hidden={{ assignmentId: a.id }}>
             <SubmitButton size="sm" variant="outline" pendingText="Saving…">

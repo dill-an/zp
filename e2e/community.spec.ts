@@ -1,6 +1,6 @@
 import { test, expect, type Browser, type BrowserContext, type BrowserContextOptions } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { ADMIN, BROTHER, login, uniq } from "./helpers";
+import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
 
 type Account = { username: string; password: string };
 type StorageState = Awaited<ReturnType<BrowserContext["storageState"]>>;
@@ -42,6 +42,11 @@ async function userPage(browser: Browser, user: Account, options: BrowserContext
 function futureLocal(days: number, time = "19:00") {
   const d = new Date(Date.now() + days * 86_400_000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${time}`;
+}
+
+/** The form's own error message (Next's route announcer also has role="alert"). */
+function formError(page: Page) {
+  return page.locator("p[role=alert]");
 }
 
 async function createEvent(page: Page, title: string, opts: { startsAt?: string; kind?: string; mandatory?: boolean } = {}) {
@@ -176,9 +181,9 @@ test("admin posts a pinned announcement and an officers-only one; the brother se
   await brother.page.goto("/announcements/new");
   await expect(brother.page).toHaveURL(/\/dashboard\?denied=announcements\.post/);
 
-  // Admin unpins and deletes the public one.
+  // Admin unpins (a double tap must not undo itself) and deletes the public one.
   await admin.page.goto("/announcements");
-  await publicCard.getByRole("button", { name: "Unpin" }).click();
+  await publicCard.getByRole("button", { name: "Unpin" }).dblclick();
   await expect(publicCard.getByRole("button", { name: "Pin", exact: true })).toBeVisible();
   await expect(publicCard.getByText("Pinned", { exact: true })).toHaveCount(0);
   admin.page.once("dialog", (d) => d.accept());
@@ -236,7 +241,7 @@ test("brother reports a maintenance issue; admin assigns it and resolves it", as
   await admin.page.getByRole("button", { name: "Update status" }).click();
   await expect(admin.page.getByText("Marked resolved.")).toBeVisible();
   await expect(admin.page.getByTestId("request-status")).toContainText("Resolved");
-  await expect(admin.page.getByText("Replaced the washer.")).toBeVisible();
+  await expect(admin.page.getByTestId("resolution-notes")).toContainText("Replaced the washer.");
 
   await admin.page.goto("/maintenance?tab=resolved");
   const resolvedCard = admin.page.locator("[data-request-id]").filter({ hasText: title });
@@ -278,11 +283,23 @@ test("calendar month renders the event and seeded house meetings", async ({ brow
   await admin.close();
 });
 
-test("mobile viewport renders events and the calendar day list", async ({ browser }) => {
+test("mobile viewport renders events, an event with duties and the calendar day list", async ({ browser }) => {
   const admin = await userPage(browser, ADMIN);
   const title = uniq("Mobile social");
   const startsAt = futureLocal(20, "21:00");
-  await createEvent(admin.page, title, { startsAt });
+  const eventUrl = await createEvent(admin.page, title, { startsAt });
+  await admin.page.getByRole("button", { name: "Add duty" }).click();
+  await admin.page.selectOption("#dutyMemberId", { label: CLEANER.name });
+  await admin.page.selectOption("#duty", "cleanup");
+  await admin.page.fill("#label", "Kitchen after midnight");
+  await admin.page.getByRole("button", { name: "Save duty" }).click();
+  await expect(admin.page.getByText("Duty added.")).toBeVisible();
+  // The manager's view has the action buttons in the table; it must fit a phone too.
+  await admin.page.setViewportSize({ width: 390, height: 844 });
+  await admin.page.goto(eventUrl);
+  await expect(admin.page.locator("tr[data-duty-id]").getByRole("button", { name: "Remove" })).toBeVisible();
+  const adminOverflow = await admin.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(adminOverflow).toBeLessThanOrEqual(1);
   await admin.close();
 
   const mobile = await userPage(browser, BROTHER, { viewport: { width: 390, height: 844 } });
@@ -293,10 +310,176 @@ test("mobile viewport renders events and the calendar day list", async ({ browse
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 
+  // The event page with a duties table must scroll the table inside its card, not widen the page.
+  await page.goto(eventUrl);
+  await expect(page.locator("tr[data-duty-id]").filter({ hasText: CLEANER.name })).toBeVisible();
+  const eventOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(eventOverflow).toBeLessThanOrEqual(1);
+
   await page.goto(`/events/calendar?month=${startsAt.slice(0, 7)}`);
   const dayList = page.locator("section[aria-label='Day by day']");
   await expect(dayList).toBeVisible();
   await expect(dayList.getByRole("link", { name: title })).toBeVisible();
   await expect(page.locator(`[data-date="${startsAt.slice(0, 10)}"]`)).toBeVisible();
   await mobile.close();
+});
+
+test("forms keep select choices after a failed submit", async ({ browser }) => {
+  const admin = await userPage(browser, ADMIN);
+  const { page } = admin;
+
+  // Event form: the end-before-start rule fails on the server; kind and chair must survive the form reset.
+  await page.goto("/events/new");
+  await page.fill("#title", uniq("Retry"));
+  await page.selectOption("#kind", "rush");
+  const chairValue = (await page.locator("#chairId option").nth(1).getAttribute("value")) ?? "";
+  expect(chairValue).not.toBe("");
+  await page.selectOption("#chairId", chairValue);
+  await page.fill("#startsAt", futureLocal(5, "20:00"));
+  await page.fill("#endsAt", futureLocal(5, "19:00"));
+  await page.getByRole("button", { name: "Create event" }).click();
+  await expect(formError(page)).toContainText("The end must be after the start.");
+  await expect(page.locator("#kind")).toHaveValue("rush");
+  await expect(page.locator("#chairId")).toHaveValue(chairValue);
+
+  // Duty dialog: same rule; the brother and the duty kind must survive.
+  const eventUrl = await createEvent(page, uniq("Duty retry"));
+  await page.getByRole("button", { name: "Add duty" }).click();
+  await page.selectOption("#dutyMemberId", { label: CLEANER.name });
+  const memberValue = await page.locator("#dutyMemberId").inputValue();
+  expect(memberValue).not.toBe("");
+  await page.selectOption("#duty", "door");
+  await page.fill("#dutyStartsAt", futureLocal(10, "23:00"));
+  await page.fill("#dutyEndsAt", futureLocal(10, "22:00"));
+  await page.getByRole("button", { name: "Save duty" }).click();
+  await expect(formError(page)).toContainText("The end must be after the start.");
+  await expect(page.locator("#dutyMemberId")).toHaveValue(memberValue);
+  await expect(page.locator("#duty")).toHaveValue("door");
+
+  // Announcement: a blank body passes the browser's required check but fails on the server; audience must survive.
+  await page.goto("/announcements/new");
+  await page.fill("#title", uniq("Blank body"));
+  await page.fill("#body", " ");
+  await page.selectOption("#audience", "officers");
+  await page.getByRole("button", { name: "Post", exact: true }).click();
+  await expect(formError(page)).toContainText("Write the announcement.");
+  await expect(page.locator("#audience")).toHaveValue("officers");
+
+  // Maintenance report: a blank title fails on the server; priority must survive.
+  await page.goto("/maintenance");
+  await page.getByRole("button", { name: "Report an issue" }).click();
+  await page.fill("#report-title", " ");
+  await page.selectOption("#report-priority", "urgent");
+  await page.getByRole("button", { name: "Report", exact: true }).click();
+  await expect(formError(page)).toContainText("Say what is broken in a few words.");
+  await expect(page.locator("#report-priority")).toHaveValue("urgent");
+
+  await page.goto(eventUrl);
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete" }).click();
+  await page.waitForURL(/\/events$/);
+  await admin.close();
+});
+
+test("a brother cannot overturn a missed verdict on his own duty", async ({ browser }) => {
+  const admin = await userPage(browser, ADMIN);
+  const brother = await userPage(browser, BROTHER);
+  const eventUrl = await createEvent(admin.page, uniq("Formal"));
+  await admin.page.getByRole("button", { name: "Add duty" }).click();
+  await admin.page.selectOption("#dutyMemberId", { label: BROTHER.name });
+  await admin.page.selectOption("#duty", "sober_monitor");
+  await admin.page.getByRole("button", { name: "Save duty" }).click();
+  await expect(admin.page.getByText("Duty added.")).toBeVisible();
+
+  // The brother opens the event while the duty is still assigned, so his page offers "Mark done".
+  await brother.page.goto(eventUrl);
+  const myRow = brother.page.locator("tr[data-duty-id]").filter({ hasText: BROTHER.name });
+  const staleMarkDone = myRow.getByRole("button", { name: "Mark done" });
+  await expect(staleMarkDone).toBeVisible();
+
+  // The officer marks it missed.
+  await admin.page.goto(eventUrl);
+  const adminRow = admin.page.locator("tr[data-duty-id]").filter({ hasText: BROTHER.name });
+  await adminRow.getByRole("button", { name: "Missed" }).click();
+  await expect(adminRow.getByRole("button", { name: "Reopen" })).toBeVisible();
+  await expect(adminRow.getByRole("button", { name: "Missed" })).toHaveCount(0);
+
+  // Clicking the stale button runs the action, which must refuse: the verdict stands.
+  await Promise.all([brother.page.waitForResponse((r) => r.request().method() === "POST"), staleMarkDone.click()]);
+  await brother.page.reload();
+  await expect(myRow).toContainText("Missed");
+  await expect(myRow.getByRole("button")).toHaveCount(0);
+
+  // Once a manager reopens it, the brother may mark it done again.
+  await adminRow.getByRole("button", { name: "Reopen" }).click();
+  await expect(adminRow.getByRole("button", { name: "Missed" })).toBeVisible();
+  await brother.page.reload();
+  await expect(myRow.getByRole("button", { name: "Mark done" })).toBeVisible();
+
+  await admin.page.goto(eventUrl);
+  admin.page.once("dialog", (d) => d.accept());
+  await admin.page.getByRole("button", { name: "Delete" }).click();
+  await admin.page.waitForURL(/\/events$/);
+  await admin.close();
+  await brother.close();
+});
+
+test("changing the status from the list card keeps the resolution notes", async ({ browser }) => {
+  const admin = await userPage(browser, ADMIN);
+  const { page } = admin;
+  const title = uniq("Dryer");
+  const notes = `Replaced the heating element ${title}.`;
+
+  await page.goto("/maintenance");
+  await page.getByRole("button", { name: "Report an issue" }).click();
+  await page.fill("#report-title", title);
+  await page.getByRole("button", { name: "Report", exact: true }).click();
+  await page.waitForURL(/\/maintenance\/\d+$/);
+  const requestUrl = page.url();
+
+  // Resolve with notes on the detail page.
+  await page.selectOption("select[name=status]", "resolved");
+  await page.fill("textarea[name=resolutionNotes]", notes);
+  await page.getByRole("button", { name: "Update status" }).click();
+  await expect(page.getByText("Marked resolved.")).toBeVisible();
+  await expect(page.getByTestId("resolution-notes")).toContainText(notes);
+
+  // Change the status from the list card, which has no notes field.
+  await page.goto("/maintenance?tab=resolved");
+  const card = page.locator("[data-request-id]").filter({ hasText: title });
+  await card.getByText("Manage", { exact: true }).click();
+  await card.locator("select[name=status]").selectOption("wont_fix");
+  await card.getByRole("button", { name: "Update status" }).click();
+  await expect(card.getByText("Marked wont fix.")).toBeVisible();
+
+  // The notes are still there.
+  await page.goto(requestUrl);
+  await expect(page.getByTestId("request-status")).toContainText(/won.?t fix/i);
+  await expect(page.getByTestId("resolution-notes")).toContainText(notes);
+  await expect(page.getByText("No notes were left.")).toHaveCount(0);
+
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.waitForURL(/\/maintenance$/);
+  await admin.close();
+});
+
+test("posting to an audience that excludes the poster lands on All posts", async ({ browser }) => {
+  const admin = await userPage(browser, ADMIN);
+  const { page } = admin;
+  const title = uniq("Pledge info");
+  await page.goto("/announcements/new");
+  await page.fill("#title", title);
+  await page.fill("#body", "Study hours start Monday.");
+  await page.selectOption("#audience", "new_members");
+  await page.getByRole("button", { name: "Post", exact: true }).click();
+  await page.waitForURL(/\/announcements\?all=1$/);
+  const card = page.locator("[data-announcement-id]").filter({ hasText: title });
+  await expect(card).toBeVisible();
+  await expect(card.getByText("Not shown to you normally")).toBeVisible();
+
+  page.once("dialog", (d) => d.accept());
+  await card.getByRole("button", { name: "Delete" }).click();
+  await expect(card).toHaveCount(0);
+  await admin.close();
 });

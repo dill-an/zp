@@ -1,15 +1,29 @@
 import { test, expect, type Page } from "@playwright/test";
 import { ADMIN, BROTHER, CLEANER, login, logout, uniq } from "./helpers";
 
+/** The assignee checkbox for a brother, matched by display name on its label. */
+function assigneeBox(page: Page, name: string) {
+  return page.locator("[data-testid=assignee-list] label", { hasText: name }).first().locator("input[type=checkbox]");
+}
+
+/** Wait until React has attached to the task form: in dev mode that is a moment after load, and clicks before it are not tracked. */
+async function waitForTaskForm(page: Page) {
+  await page.waitForFunction(() => {
+    const form = document.querySelector("#title")?.closest("form");
+    return !!form && Object.keys(form).some((k) => k.startsWith("__reactFiber$"));
+  });
+}
+
 /** Fill the shared task form. Assignees are matched by display name on the checkbox labels. */
 async function fillTaskForm(
   page: Page,
   opts: { title: string; chair?: string; assignees?: string[]; checklist?: string; due?: string; recurrence?: string; priority?: string },
 ) {
+  await waitForTaskForm(page);
   await page.fill("#title", opts.title);
   if (opts.chair) await page.selectOption("#chairId", { label: opts.chair });
   for (const name of opts.assignees ?? []) {
-    await page.locator("[data-testid=assignee-list] label", { hasText: name }).first().locator("input[type=checkbox]").check();
+    await assigneeBox(page, name).check();
   }
   if (opts.checklist) await page.fill("#checklist", opts.checklist);
   if (opts.due) await page.fill("#dueAt", opts.due);
@@ -60,7 +74,8 @@ test("admin creates a chair task with two assignees and a checklist; the brother
   await page.waitForURL(`**/tasks/${taskId}`, { waitUntil: "commit" });
   await expect(page.getByText("Assigned to you")).toBeVisible();
 
-  await page.getByLabel("Pick a date").check();
+  // By role: the assignee also sees the Remove button, whose aria-label contains the item text.
+  await page.getByRole("checkbox", { name: "Pick a date" }).check();
   await expect(page.getByTestId("checklist-progress")).toHaveText("1/2 done");
   await expect(page.locator("[data-testid=checklist-item][data-done='1']")).toHaveCount(1);
 
@@ -77,6 +92,54 @@ test("admin creates a chair task with two assignees and a checklist; the brother
   await expect(doneRow).toContainText("Gio");
   await page.goto("/tasks?tab=mine&status=open");
   await expect(page.getByRole("link", { name: title })).toHaveCount(0);
+});
+
+test("assignees ticked before a rejected submit survive it, on the new and the edit form", async ({ page }) => {
+  const title = uniq("Keep assignees");
+  const tooLong = "x".repeat(5001);
+  await login(page, ADMIN);
+  await page.goto("/tasks/new");
+  await fillTaskForm(page, { title, assignees: [BROTHER.name, CLEANER.name] });
+  await expect(page.getByText("2 selected")).toBeVisible();
+  // The description has no client-side limit, so the server rejects it and React resets the form's DOM.
+  await page.fill("#description", tooLong);
+  await page.click("form button[type=submit]:has-text('Create task')");
+  await expect(page.locator("p[role=alert]")).toContainText("Keep the description under 5000 characters", { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/tasks\/new/);
+  await expect(assigneeBox(page, BROTHER.name)).toBeChecked();
+  await expect(assigneeBox(page, CLEANER.name)).toBeChecked();
+  await expect(page.getByText("2 selected")).toBeVisible();
+
+  await page.fill("#description", "Short enough.");
+  const taskId = await submitTaskForm(page);
+  await expect(page.locator("h1")).toHaveText(title);
+  await expect(page.getByText("Unassigned")).toHaveCount(0);
+  await expect(page.getByText("Gio", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Martin", { exact: true }).first()).toBeVisible();
+  await expect(page.locator("[data-activity-type=assignment]").first()).toContainText("Gio Mandwee, Martin Meister");
+
+  // Edit: an assignee added before a rejected save is kept too, next to the ones already saved.
+  await page.goto(`/tasks/${taskId}/edit`);
+  await waitForTaskForm(page);
+  await expect(assigneeBox(page, BROTHER.name)).toBeChecked();
+  await assigneeBox(page, ADMIN.name).check();
+  await expect(page.getByText("3 selected")).toBeVisible();
+  await page.fill("#description", tooLong);
+  await page.click("form button[type=submit]:has-text('Save changes')");
+  await expect(page.locator("p[role=alert]")).toContainText("Keep the description under 5000 characters", { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/edit$/);
+  await expect(assigneeBox(page, ADMIN.name)).toBeChecked();
+  await expect(assigneeBox(page, BROTHER.name)).toBeChecked();
+  await expect(assigneeBox(page, CLEANER.name)).toBeChecked();
+  await expect(page.getByText("3 selected")).toBeVisible();
+
+  await page.fill("#description", "Short enough, edited.");
+  await page.click("form button[type=submit]:has-text('Save changes')");
+  await page.waitForURL(`**/tasks/${taskId}`, { waitUntil: "commit" });
+  await expect(page.getByText("Assigned to you")).toBeVisible();
+  await expect(page.getByText("Gio", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Martin", { exact: true }).first()).toBeVisible();
+  await expect(page.locator("[data-activity-type=assignment]").last()).toContainText("Assigned to Dylan Nguyen");
 });
 
 test("a brother cannot edit someone else's chair task but can comment", async ({ page }) => {

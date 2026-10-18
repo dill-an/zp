@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { MemberSelect } from "@/components/member-select";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { fieldValue } from "@/lib/action-result";
 import { saveRowAssignments } from "@/lib/actions/labor";
 
 export type PickGroup = { label: string; members: { id: number; firstName: string; lastName: string; preferredName: string }[] };
@@ -25,20 +26,26 @@ export function RowAssignForm({
     <form action={action} className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="weekId" value={weekId} />
       <input type="hidden" name="jobTypeId" value={jobTypeId} />
-      {slots.map((s) => (
-        <div key={s.slot} className="min-w-0 flex-1 basis-40">
-          <MemberSelect
-            name={`slot_${s.slot}`}
-            aria-label={`Slot ${s.slot}`}
-            groups={groups}
-            placeholder="Open"
-            defaultValue={s.memberId ?? ""}
-            disabled={s.locked}
-            title={s.locked ? `Already ${s.lockedLabel ?? "resolved"}; reset it on the Verify page to change it.` : undefined}
-            className="h-9 text-sm"
-          />
-        </div>
-      ))}
+      {slots.map((s) => {
+        // After a failed save React resets the form; keep the manager's picks instead of the saved assignees.
+        // The key remounts the select, because React never re-applies a changed defaultValue to a <select>.
+        const value = fieldValue(result, `slot_${s.slot}`, s.memberId ?? "");
+        return (
+          <div key={s.slot} className="min-w-0 flex-1 basis-40">
+            <MemberSelect
+              key={value}
+              name={`slot_${s.slot}`}
+              aria-label={`Slot ${s.slot}`}
+              groups={groups}
+              placeholder="Open"
+              defaultValue={value}
+              disabled={s.locked}
+              title={s.locked ? `Already ${s.lockedLabel ?? "resolved"}; reset it on the Verify page to change it.` : undefined}
+              className="h-9 text-sm"
+            />
+          </div>
+        );
+      })}
       <SubmitButton size="sm" variant="secondary" pendingText="Saving…">
         Save
       </SubmitButton>

@@ -68,7 +68,11 @@ export default async function SwapsPage() {
   const forMe = all.filter((r) => r.targetMemberId === user.id && r.requestedById !== user.id && (r.status === "pending" || r.status === "accepted"));
   const open = all.filter((r) => r.targetMemberId == null && r.status === "pending" && r.requestedById !== user.id);
   const pendingAll = all.filter((r) => r.status === "pending" || r.status === "accepted");
-  const recent = all.filter((r) => r.status === "approved" || r.status === "declined" || r.status === "cancelled").slice(0, 20);
+  // Decisions (and their free-text reasons) are shown to managers and to the brothers involved only.
+  const recent = all
+    .filter((r) => r.status === "approved" || r.status === "declined" || r.status === "cancelled")
+    .filter((r) => manager || r.requestedById === user.id || r.targetMemberId === user.id)
+    .slice(0, 20);
 
   return (
     <>
@@ -135,22 +139,34 @@ export default async function SwapsPage() {
           {manager ? (
             <Section
               title="Pending approval"
-              hint="Approving moves the job to the accepting brother. Open requests need a taker first."
+              hint="Approving moves the job to the brother who accepted. Requests nobody has accepted yet wait here."
               items={pendingAll}
-              render={(r) => (
-                <SwapRow key={r.id} r={r}>
-                  <ActionForm action={approveSwap} hidden={{ swapId: r.id }}>
-                    <SubmitButton size="sm" disabled={r.targetMemberId == null} pendingText="Saving…">
-                      Approve
-                    </SubmitButton>
-                  </ActionForm>
-                  <ActionForm action={declineSwap} hidden={{ swapId: r.id }}>
-                    <SubmitButton size="sm" variant="outline" pendingText="Saving…">
-                      Decline
-                    </SubmitButton>
-                  </ActionForm>
-                </SwapRow>
-              )}
+              render={(r) => {
+                // Approve only once the taker has accepted and the requester still holds the job.
+                const stale = r.requestedById !== r.assignment.memberId;
+                const why = stale
+                  ? `${displayName(r.assignment.member)} now holds this job; decline this request`
+                  : r.status !== "accepted"
+                    ? r.targetMember
+                      ? `waiting for ${r.targetMember.preferredName} to accept`
+                      : "no taker yet"
+                    : null;
+                return (
+                  <SwapRow key={r.id} r={r}>
+                    {why ? <span className="text-xs text-muted">{why}</span> : null}
+                    <ActionForm action={approveSwap} hidden={{ swapId: r.id }}>
+                      <SubmitButton size="sm" disabled={why != null} pendingText="Saving…">
+                        Approve
+                      </SubmitButton>
+                    </ActionForm>
+                    <ActionForm action={declineSwap} hidden={{ swapId: r.id }}>
+                      <SubmitButton size="sm" variant="outline" pendingText="Saving…">
+                        Decline
+                      </SubmitButton>
+                    </ActionForm>
+                  </SwapRow>
+                );
+              }}
             />
           ) : null}
           {recent.length ? <Section title="Recent decisions" items={recent} render={(r) => <SwapRow key={r.id} r={r} />} /> : null}

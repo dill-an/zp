@@ -28,6 +28,23 @@ export type SanctionFormDefaults = {
   notes?: string | null;
 };
 
+/**
+ * A key that changes every time the action returns a new result. React resets the form's
+ * controls after the action; text inputs pick up their new `defaultValue`, but a `<select>`
+ * does not re-apply a changed `defaultValue` and a checkbox does not re-apply `checked`, so
+ * those snap back to what they showed on mount. Remounting them with this key makes them
+ * mount again with the submitted values before the reset runs.
+ */
+function useResultKey(result: ActionResult | null): number {
+  const [seen, setSeen] = useState<{ result: ActionResult | null; key: number }>({ result, key: 0 });
+  if (seen.result !== result) {
+    const next = { result, key: seen.key + 1 };
+    setSeen(next);
+    return next.key;
+  }
+  return seen.key;
+}
+
 export function SanctionForm({
   mode,
   id,
@@ -48,7 +65,10 @@ export function SanctionForm({
 }) {
   const action = mode === "edit" && id != null ? updateSanction.bind(null, id) : createSanction;
   const [result, formAction] = useActionState(action, null);
+  const resetKey = useResultKey(result);
   const [multi, setMulti] = useState(false);
+  // Chosen brothers, kept in state so a failed submit (which resets the form) does not lose them.
+  const [memberIds, setMemberIds] = useState<number[]>(() => (defaults.memberId ? [defaults.memberId] : []));
   const errors = (key: string) => (result && !result.ok ? result.fieldErrors?.[key] : undefined);
 
   return (
@@ -56,7 +76,15 @@ export function SanctionForm({
       <CardContent className="py-5">
         <form action={formAction} className="space-y-4">
           {mode === "create" ? (
-            <MemberPicker groups={groups} multi={multi} setMulti={setMulti} result={result} defaultMemberId={defaults.memberId ?? null} error={errors("memberId") ?? errors("memberIds")} />
+            <MemberPicker
+              groups={groups}
+              multi={multi}
+              setMulti={setMulti}
+              memberIds={memberIds}
+              setMemberIds={setMemberIds}
+              resetKey={resetKey}
+              error={errors("memberId") ?? errors("memberIds")}
+            />
           ) : (
             <div className="rounded-md bg-surface-2 px-3 py-2 text-sm">
               <span className="text-muted">Brother: </span>
@@ -83,7 +111,7 @@ export function SanctionForm({
 
           <FormRow>
             <Field label="Source" htmlFor="source" error={errors("source")}>
-              <Select id="source" name="source" defaultValue={fieldValue(result, "source", defaults.source ?? "manual")}>
+              <Select key={`source-${resetKey}`} id="source" name="source" defaultValue={fieldValue(result, "source", defaults.source ?? "manual")}>
                 {sources.map((s) => (
                   <option key={s} value={s}>
                     {SOURCE_LABELS[s] ?? s}
@@ -118,18 +146,20 @@ function MemberPicker({
   groups,
   multi,
   setMulti,
-  result,
-  defaultMemberId,
+  memberIds,
+  setMemberIds,
+  resetKey,
   error,
 }: {
   groups: MemberGroup[];
   multi: boolean;
   setMulti: (v: boolean) => void;
-  result: ActionResult | null;
-  defaultMemberId: number | null;
+  memberIds: number[];
+  setMemberIds: (update: (prev: number[]) => number[]) => void;
+  resetKey: number;
   error?: string[];
 }) {
-  const failedValues = result && !result.ok ? result.values : undefined;
+  const toggleMember = (id: number, on: boolean) => setMemberIds((prev) => (on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)));
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -138,19 +168,19 @@ function MemberPicker({
           <span className="text-danger"> *</span>
         </span>
         <label className="flex items-center gap-2 text-sm">
-          <Checkbox name="multi" value="1" checked={multi} onChange={(e) => setMulti(e.target.checked)} />
+          <Checkbox key={`multi-${resetKey}`} name="multi" value="1" defaultChecked={multi} onChange={(e) => setMulti(e.target.checked)} />
           Apply to several brothers
         </label>
       </div>
       {multi ? (
-        <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-border p-3">
+        <div key={`list-${resetKey}`} className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-border p-3">
           {groups.map((g) => (
             <fieldset key={g.label}>
               <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{g.label}</legend>
               <div className="grid gap-1 sm:grid-cols-2">
                 {g.members.map((m) => (
                   <label key={m.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-surface-2">
-                    <Checkbox name="memberIds[]" value={m.id} defaultChecked={m.id === defaultMemberId} />
+                    <Checkbox name="memberIds[]" value={m.id} defaultChecked={memberIds.includes(m.id)} onChange={(e) => toggleMember(m.id, e.target.checked)} />
                     {displayName(m)}
                   </label>
                 ))}
@@ -160,7 +190,18 @@ function MemberPicker({
           <p className="text-xs text-muted">One sanction is created per brother, each with its own fine.</p>
         </div>
       ) : (
-        <MemberSelect id="memberId" name="memberId" groups={groups} required defaultValue={failedValues?.memberId ?? (defaultMemberId ? String(defaultMemberId) : "")} />
+        <MemberSelect
+          key={`member-${resetKey}`}
+          id="memberId"
+          name="memberId"
+          groups={groups}
+          required
+          defaultValue={memberIds[0] ? String(memberIds[0]) : ""}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            setMemberIds(() => (v ? [v] : []));
+          }}
+        />
       )}
       {error?.length ? <p className="text-xs text-danger">{error[0]}</p> : null}
     </div>

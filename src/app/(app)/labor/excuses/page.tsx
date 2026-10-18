@@ -18,6 +18,8 @@ export const metadata = { title: "Excuses | Labor" };
 
 function Row({ r, children }: { r: ExcuseRequestDetail; children?: React.ReactNode }) {
   const a = r.assignment;
+  // The job moved to someone else since the request (approved swap, manual reassignment): approving would excuse the new assignee.
+  const stale = r.status === "pending" && r.memberId !== a.memberId;
   return (
     <li className="flex flex-col gap-2 px-3 py-2 lg:flex-row lg:items-center lg:justify-between" data-excuse={r.id} data-job={a.jobType.name} data-week={a.weekStart}>
       <div className="min-w-0 space-y-0.5 text-sm">
@@ -29,6 +31,11 @@ function Row({ r, children }: { r: ExcuseRequestDetail; children?: React.ReactNo
           <span className="text-muted">week of {formatDate(a.weekStart)}</span>
           <AssignmentStatePill state={a.state} />
           <StatusPill status={r.status} />
+          {stale ? (
+            <span className="text-xs font-medium text-warning" data-testid="excuse-stale">
+              Job now held by {displayName(a.member)}; this request no longer applies
+            </span>
+          ) : null}
         </div>
         <p className="text-xs text-muted">
           &quot;{r.reason}&quot; · asked {formatDateTime(r.createdAt)}
@@ -61,19 +68,16 @@ export default async function ExcusesPage() {
               <ul className="divide-y divide-border rounded-lg border border-border bg-surface">
                 {pending.map((r) => (
                   <Row key={r.id} r={r}>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <ActionForm action={reviewExcuse} hidden={{ excuseId: r.id, decision: "approve" }}>
-                        <Input name="note" placeholder="Note (optional)" aria-label="Review note" className="h-8 w-40 text-xs" />
-                        <SubmitButton size="sm" pendingText="Saving…">
-                          Approve
-                        </SubmitButton>
-                      </ActionForm>
-                      <ActionForm action={reviewExcuse} hidden={{ excuseId: r.id, decision: "deny" }}>
-                        <SubmitButton size="sm" variant="outline" pendingText="Saving…">
-                          Deny
-                        </SubmitButton>
-                      </ActionForm>
-                    </div>
+                    {/* One form: the note goes with whichever decision is pressed. */}
+                    <ActionForm action={reviewExcuse} hidden={{ excuseId: r.id }}>
+                      <Input name="note" placeholder="Note (optional)" aria-label="Review note" maxLength={500} className="h-8 w-44 text-xs" />
+                      <SubmitButton size="sm" name="decision" value="approve" pendingText="Saving…" disabled={r.memberId !== r.assignment.memberId}>
+                        Approve
+                      </SubmitButton>
+                      <SubmitButton size="sm" name="decision" value="deny" variant="outline" pendingText="Saving…">
+                        Deny
+                      </SubmitButton>
+                    </ActionForm>
                   </Row>
                 ))}
               </ul>

@@ -76,7 +76,7 @@ export default async function ChairPage({ params, searchParams }: { params: Para
             ) : null}
             {canManage ? (
               <>
-                <AssignHolderDialog chairId={chair.id} chairName={chair.name} groups={groups} today={todayISO()} hasCurrent={holders.length > 0} />
+                {chair.isActive ? <AssignHolderDialog chairId={chair.id} chairName={chair.name} groups={groups} today={todayISO()} hasCurrent={holders.length > 0} /> : null}
                 <ButtonLink href={`/chairs/${chair.slug}/edit`} variant="outline" size="sm">
                   Edit chair
                 </ButtonLink>
@@ -101,7 +101,7 @@ export default async function ChairPage({ params, searchParams }: { params: Para
           </CardHeader>
           <CardContent>
             {holders.length === 0 ? (
-              <p className="text-sm text-muted">Unassigned.{canManage ? " Use Assign holder to set one." : ""}</p>
+              <p className="text-sm text-muted">Unassigned.{canManage ? (chair.isActive ? " Use Assign holder to set one." : " Inactive chairs cannot take holders.") : ""}</p>
             ) : (
               <ul className="divide-y divide-border" data-testid="current-holders">
                 {holders.map((h) => (

@@ -50,7 +50,8 @@ export default async function LaborStatsPage({ searchParams }: { searchParams: P
       ) : (
         <div className="space-y-6">
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
+            {/* min-w-0: a grid item otherwise grows to its table's intrinsic width and the page scrolls sideways on phones. */}
+            <Card className="min-w-0">
               <CardHeader>
                 <CardTitle>Cooks vs cleans</CardTitle>
               </CardHeader>
@@ -82,7 +83,7 @@ export default async function LaborStatsPage({ searchParams }: { searchParams: P
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="min-w-0">
               <CardHeader>
                 <div>
                   <CardTitle>Brothers with fewer than {min} job{min === 1 ? "" : "s"}</CardTitle>

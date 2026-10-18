@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { getMemberProfile, type ChairTerm } from "@/lib/queries/members";
-import { termLabel } from "@/lib/queries/members-logic";
+import { canManageMemberAccount, termLabel } from "@/lib/queries/members-logic";
 import { setMemberStatusForm } from "@/lib/actions/members";
 import { displayName, fullName, initials } from "@/lib/names";
 import { formatDate } from "@/lib/dates";
@@ -72,6 +72,8 @@ export default async function MemberProfilePage({ params, searchParams }: { para
   const { member, pledgeClass, currentChairs, chairHistory } = profile;
 
   const canManage = can(viewer, "members.manage");
+  // Only admins may reset or deactivate another admin; other members.manage holders just get Edit.
+  const canManageAccount = canManage && canManageMemberAccount(viewer.role, member.role);
   const isSelf = viewer.id === member.id;
   const canEdit = isSelf || canManage;
   const seesPrivate = isSelf || canManage;
@@ -105,8 +107,8 @@ export default async function MemberProfilePage({ params, searchParams }: { para
                 Edit
               </ButtonLink>
             ) : null}
-            {canManage ? <ResetPasswordDialog memberId={member.id} memberName={name} /> : null}
-            {canManage && !isSelf ? (
+            {canManageAccount ? <ResetPasswordDialog memberId={member.id} memberName={name} /> : null}
+            {canManageAccount && !isSelf ? (
               <form action={setMemberStatusForm}>
                 <input type="hidden" name="memberId" value={member.id} />
                 <input type="hidden" name="status" value={inactive ? "active" : "inactive"} />

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canManageMemberAccount,
   chairSlugFromName,
   csvEscape,
   filterRoster,
@@ -273,5 +274,18 @@ describe("termLabel", () => {
   it("renders open and closed terms", () => {
     expect(termLabel("2026-09-01", null, fmt)).toBe("2026-09-01 to present");
     expect(termLabel("2025-09-01", "2026-05-15", fmt)).toBe("2025-09-01 to 2026-05-15");
+  });
+});
+
+describe("canManageMemberAccount", () => {
+  it("lets only admins reset or deactivate another admin", () => {
+    expect(canManageMemberAccount("admin", "admin")).toBe(true);
+    expect(canManageMemberAccount("officer", "admin")).toBe(false);
+    expect(canManageMemberAccount("member", "admin")).toBe(false);
+  });
+  it("lets any members.manage holder act on officers and members", () => {
+    expect(canManageMemberAccount("officer", "officer")).toBe(true);
+    expect(canManageMemberAccount("officer", "member")).toBe(true);
+    expect(canManageMemberAccount("member", "member")).toBe(true);
   });
 });

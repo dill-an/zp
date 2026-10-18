@@ -1,5 +1,5 @@
 import { test, expect as baseExpect, type Page } from "@playwright/test";
-import { ADMIN, BROTHER, CLEANER, login } from "./helpers";
+import { ADMIN, BROTHER, CLEANER, login, logout, uniq } from "./helpers";
 
 /**
  * Labor module flows. Tests run in order and share one far-future week that is unique to this
@@ -17,11 +17,20 @@ function uniqueFutureSunday(): string {
 /** Server actions re-render the page; give assertions room on a slow machine. */
 const expect = baseExpect.configure({ timeout: 20_000 });
 
+/** A new member outside the labor pool with no part in any request (see docs/specs/README.md). */
+const OUTSIDER = { username: "marcos.arroyo-cruz", password: "zetapsi" };
+
 const WEEK = uniqueFutureSunday();
 const JOB_DONE = "Upstairs Commons"; // Martin: marks done, admin verifies
 const JOB_MISSED = "Basement Commons"; // Gio: admin marks missed -> sanction
-const JOB_SWAP = "Basement Bathroom"; // Martin -> swap to Gio
+const JOB_SWAP = "Basement Bathroom"; // Martin -> swap to Gio; Martin's stale excuse must not excuse Gio
 const JOB_EXCUSE = "2nd Floor Bathroom"; // Gio: excuse request approved
+
+/** The login page sends signed-in users to the dashboard, so log out before signing in as someone else. */
+async function switchUser(page: Page, user: { username: string; password: string }) {
+  await logout(page);
+  await login(page, user);
+}
 
 async function assignRow(page: Page, job: string, brotherLabel: string) {
   const row = page.locator(`tr[data-job="${job}"]`);
@@ -56,12 +65,21 @@ test.describe.serial("labor", () => {
     await assignRow(page, JOB_SWAP, CLEANER.name);
     await assignRow(page, JOB_MISSED, BROTHER.name);
     await assignRow(page, JOB_EXCUSE, BROTHER.name);
-    // The same brother cannot take both slots of one job.
+    // The same brother cannot take both slots of one job; the rejected picks stay in the selects.
     const kitchen = page.locator("tr[data-job='Monday Kitchen']");
     await kitchen.locator("select[name=slot_1]").selectOption({ label: BROTHER.name });
     await kitchen.locator("select[name=slot_2]").selectOption({ label: BROTHER.name });
     await kitchen.getByRole("button", { name: "Save" }).click();
     await expect(kitchen.getByRole("alert")).toContainText("same brother");
+    await expect(kitchen.locator("select[name=slot_1] option:checked")).toHaveText(BROTHER.name);
+    await expect(kitchen.locator("select[name=slot_2] option:checked")).toHaveText(BROTHER.name);
+
+    // Week notes over the limit are rejected without losing the typed text.
+    const tooLong = "n".repeat(2100);
+    await page.locator("#week-notes").fill(tooLong);
+    await page.getByRole("button", { name: "Save notes" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: /notes/i })).toBeVisible();
+    await expect(page.locator("#week-notes")).toHaveValue(tooLong);
 
     await page.getByRole("link", { name: "Done managing" }).click();
     await page.waitForURL(new RegExp(`/labor/week/${WEEK}$`));
@@ -70,7 +88,7 @@ test.describe.serial("labor", () => {
     await expect(doneRow.getByText("Upcoming")).toBeVisible();
   });
 
-  test("cleaner sees the job on My jobs, marks it done and requests a swap", async ({ page }) => {
+  test("cleaner sees the job on My jobs, marks it done and requests a swap and an excuse", async ({ page }) => {
     await login(page, CLEANER);
     await page.goto("/labor/me");
     await expect(page.getByRole("heading", { level: 1, name: "My jobs" })).toBeVisible();
@@ -80,6 +98,7 @@ test.describe.serial("labor", () => {
     await expect(card.getByText("Done", { exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Undo" })).toBeVisible();
 
+    // The dialog stays open long enough to show its confirmation, then closes itself.
     const swapCard = page.locator(`li[data-week="${WEEK}"][data-job="${JOB_SWAP}"]`);
     await swapCard.getByRole("button", { name: "Request swap" }).click();
     const dialog = page.locator("dialog[open]");
@@ -89,9 +108,25 @@ test.describe.serial("labor", () => {
     await expect(dialog.getByRole("status")).toContainText("Swap requested");
     await expect(page.locator("dialog[open]")).toHaveCount(0);
     await expect(swapCard.getByText(/waiting for Gio/)).toBeVisible();
+    await expect(swapCard.getByRole("button", { name: "Request swap" })).toHaveCount(0);
+
+    // Both requests on the same job: the excuse becomes stale once the swap is approved (next test).
+    await swapCard.getByRole("button", { name: "Request excuse" }).click();
+    await dialog.locator("textarea[name=reason]").fill("Doctor appointment");
+    await dialog.getByRole("button", { name: "Request excuse" }).click();
+    await expect(dialog.getByRole("status")).toContainText("Excuse requested");
+    await expect(page.locator("dialog[open]")).toHaveCount(0);
+    await expect(swapCard.getByText("Excuse requested")).toBeVisible();
+
+    // A manager cannot approve a swap nobody has accepted yet.
+    await switchUser(page, ADMIN);
+    await page.goto("/labor/swaps");
+    const pending = page.locator(`li[data-swap][data-week="${WEEK}"][data-job="${JOB_SWAP}"]`).filter({ has: page.getByRole("button", { name: "Approve" }) });
+    await expect(pending.first().getByRole("button", { name: "Approve" })).toBeDisabled();
+    await expect(pending.first().getByText(/waiting for Gio to accept/)).toBeVisible();
   });
 
-  test("brother accepts the swap and requests an excuse; admin approves both", async ({ page }) => {
+  test("brother accepts the swap and requests an excuse; admin approves both; a stale excuse cannot excuse the new assignee", async ({ page, context }) => {
     await login(page, BROTHER);
     await page.goto("/labor/swaps");
     const row = page.locator(`li[data-swap][data-week="${WEEK}"][data-job="${JOB_SWAP}"]`).first();
@@ -108,13 +143,37 @@ test.describe.serial("labor", () => {
     await expect(dialog.getByRole("status")).toContainText("Excuse requested");
     await expect(page.locator("dialog[open]")).toHaveCount(0);
 
-    await login(page, ADMIN);
+    await switchUser(page, ADMIN);
+    // A second tab holds the excuses page from before the swap is approved: its Approve button is live.
+    const staleTab = await context.newPage();
+    await staleTab.goto("/labor/excuses");
+    const staleExcuse = staleTab.locator(`li[data-excuse][data-week="${WEEK}"][data-job="${JOB_SWAP}"]`).first();
+    await expect(staleExcuse.getByRole("button", { name: "Approve" })).toBeEnabled();
+
     await page.goto("/labor/swaps");
     const pending = page.locator(`li[data-swap][data-week="${WEEK}"][data-job="${JOB_SWAP}"]`).filter({ has: page.getByRole("button", { name: "Approve" }) });
+    await expect(pending.first().getByRole("button", { name: "Approve" })).toBeEnabled();
     await pending.first().getByRole("button", { name: "Approve" }).click();
     await expect(page.locator(`li[data-swap][data-week="${WEEK}"][data-job="${JOB_SWAP}"]`).first().getByText("Approved", { exact: true })).toBeVisible();
     await page.goto(`/labor/week/${WEEK}`);
     await expect(page.locator(`tr[data-job="${JOB_SWAP}"]`).getByRole("link", { name: "Gio" })).toBeVisible();
+
+    // Martin's excuse on the job Gio now holds: the server refuses it, the refreshed row says why, and
+    // denying with a note still works.
+    await staleExcuse.getByRole("button", { name: "Approve" }).click();
+    await expect(staleExcuse.getByRole("alert")).toContainText("now holds this job");
+    await staleTab.reload();
+    await expect(staleExcuse.getByTestId("excuse-stale")).toContainText("Gio");
+    await expect(staleExcuse.getByRole("button", { name: "Approve" })).toBeDisabled();
+    await staleExcuse.getByLabel("Review note").fill("Job moved to Gio");
+    await staleExcuse.getByRole("button", { name: "Deny" }).click();
+    await expect(staleTab.locator(`li[data-excuse][data-week="${WEEK}"][data-job="${JOB_SWAP}"]`).first().getByText(/denied by Dylan Nguyen: Job moved to Gio/)).toBeVisible();
+    await staleTab.close();
+    await page.goto(`/labor/week/${WEEK}`);
+    const swapRow = page.locator(`tr[data-job="${JOB_SWAP}"]`);
+    await expect(swapRow.getByRole("link", { name: "Gio" })).toBeVisible();
+    await expect(swapRow.getByText("Upcoming")).toBeVisible();
+    await expect(swapRow.getByText("Excused")).toHaveCount(0);
 
     await page.goto("/labor/excuses");
     const excuse = page.locator(`li[data-excuse][data-week="${WEEK}"][data-job="${JOB_EXCUSE}"]`).first();
@@ -138,6 +197,7 @@ test.describe.serial("labor", () => {
     await expect(dialog.getByRole("status")).toContainText("sanction");
     await expect(page.locator("dialog[open]")).toHaveCount(0);
     await expect(missed.getByText("Missed", { exact: true })).toBeVisible();
+    await expect(missed.getByRole("button", { name: "Mark missed" })).toHaveCount(0);
     await expect(missed.getByTestId("sanction-link")).toContainText("Sanction issued");
     await expect(page.locator(`li[data-job="${JOB_EXCUSE}"][data-member="${BROTHER.username}"]`).getByText("Excused", { exact: true })).toBeVisible();
   });
@@ -161,7 +221,40 @@ test.describe.serial("labor", () => {
     await expect(page.getByText("Per brother")).toBeVisible();
   });
 
-  test("plain brother cannot see or reach manage controls", async ({ page }) => {
+  test("admin keeps what they typed when a job type fails validation, then creates and deletes it", async ({ page }) => {
+    const name = uniq("Porch");
+    await login(page, ADMIN);
+    await page.goto("/labor/jobs/new");
+    await page.locator("#jt-name").fill(name);
+    await page.locator("#jt-window").fill("Fri");
+    await page.locator("#jt-start").selectOption("5");
+    await page.locator("#jt-due").selectOption("2");
+    await page.locator("#jt-slots").fill("2");
+    await page.locator("#jt-points").fill("3");
+    await page.locator("#jt-instructions").fill("Sweep the porch");
+    await page.getByRole("button", { name: "Create job type" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "due day cannot be before" })).toBeVisible();
+    await expect(page.locator("#jt-name")).toHaveValue(name);
+    await expect(page.locator("#jt-window")).toHaveValue("Fri");
+    await expect(page.locator("#jt-start")).toHaveValue("5");
+    await expect(page.locator("#jt-due")).toHaveValue("2");
+    await expect(page.locator("#jt-slots")).toHaveValue("2");
+    await expect(page.locator("#jt-points")).toHaveValue("3");
+    await expect(page.locator("#jt-instructions")).toHaveValue("Sweep the porch");
+
+    await page.locator("#jt-due").selectOption("6");
+    await page.getByRole("button", { name: "Create job type" }).click();
+    await page.waitForURL(/\/labor\/jobs$/);
+    const row = page.locator(`tr[data-jobtype="${name}"]`);
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("+5d");
+    await expect(row).toContainText("+6d");
+    page.on("dialog", (d) => d.accept());
+    await row.getByRole("button", { name: "Delete" }).click();
+    await expect(page.locator(`tr[data-jobtype="${name}"]`)).toHaveCount(0);
+  });
+
+  test("plain brother cannot see or reach manage controls, and uninvolved brothers do not see others' swaps", async ({ page }) => {
     await login(page, BROTHER);
     await page.goto(`/labor/week/${WEEK}?manage=1`);
     await expect(page.getByText("Manage this week")).toHaveCount(0);
@@ -174,9 +267,18 @@ test.describe.serial("labor", () => {
     await expect(page).toHaveURL(/\/dashboard\?denied=labor\.manage/);
     await page.goto("/labor/excuses");
     await expect(page).toHaveURL(/\/dashboard\?denied=labor\.manage/);
+
+    // Gio took the job, so he sees the decision; a brother with no part in it does not.
+    await page.goto("/labor/swaps");
+    await expect(page.locator(`li[data-swap][data-week="${WEEK}"][data-job="${JOB_SWAP}"]`).first()).toContainText("Away that weekend");
+    await switchUser(page, OUTSIDER);
+    await page.goto("/labor/swaps");
+    await expect(page.getByRole("heading", { level: 1, name: "Swaps" })).toBeVisible();
+    await expect(page.locator(`li[data-swap][data-week="${WEEK}"]`)).toHaveCount(0);
+    await expect(page.getByText("Away that weekend")).toHaveCount(0);
   });
 
-  test("mobile viewport renders the grid without horizontal page overflow", async ({ page }) => {
+  test("mobile viewport renders the grid, brothers and stats without horizontal page overflow", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await login(page, CLEANER);
     await page.goto("/labor");
@@ -190,6 +292,10 @@ test.describe.serial("labor", () => {
     await page.goto("/labor/brothers");
     const overflow2 = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow2).toBeLessThanOrEqual(0);
+    await page.goto("/labor/stats");
+    await expect(page.getByText("Cooks vs cleans")).toBeVisible();
+    const overflow3 = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow3).toBeLessThanOrEqual(0);
   });
 
   test("admin resets the test week and deletes it", async ({ page }) => {

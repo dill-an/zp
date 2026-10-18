@@ -40,10 +40,14 @@ function SwapForm({ assignmentId, jobName, brothers, close }: { assignmentId: nu
   );
 }
 
-/** "Request swap" button plus modal form. */
-export function SwapDialog({ assignmentId, jobName, brothers }: { assignmentId: number; jobName: string; brothers: Pick[] }) {
+/**
+ * "Request swap" button plus modal form. `hidden` hides the trigger once a request is pending while
+ * keeping the dialog mounted, so the confirmation message stays visible until the dialog closes itself
+ * (the page re-renders in the same response as the action).
+ */
+export function SwapDialog({ assignmentId, jobName, brothers, hidden = false }: { assignmentId: number; jobName: string; brothers: Pick[]; hidden?: boolean }) {
   return (
-    <Dialog trigger="Request swap" triggerVariant="outline" triggerSize="sm" title={`Swap ${jobName}`}>
+    <Dialog trigger="Request swap" triggerVariant="outline" triggerSize="sm" triggerClassName={hidden ? "hidden" : undefined} title={`Swap ${jobName}`}>
       {(close) => <SwapForm assignmentId={assignmentId} jobName={jobName} brothers={brothers} close={close} />}
     </Dialog>
   );
@@ -70,10 +74,10 @@ function ExcuseForm({ assignmentId, jobName, close }: { assignmentId: number; jo
   );
 }
 
-/** "Request excuse" button plus modal form. */
-export function ExcuseDialog({ assignmentId, jobName }: { assignmentId: number; jobName: string }) {
+/** "Request excuse" button plus modal form; `hidden` works as on SwapDialog. */
+export function ExcuseDialog({ assignmentId, jobName, hidden = false }: { assignmentId: number; jobName: string; hidden?: boolean }) {
   return (
-    <Dialog trigger="Request excuse" triggerVariant="outline" triggerSize="sm" title={`Excuse from ${jobName}`}>
+    <Dialog trigger="Request excuse" triggerVariant="outline" triggerSize="sm" triggerClassName={hidden ? "hidden" : undefined} title={`Excuse from ${jobName}`}>
       {(close) => <ExcuseForm assignmentId={assignmentId} jobName={jobName} close={close} />}
     </Dialog>
   );

@@ -47,6 +47,11 @@ export function PaymentForm({
   useCloseOnSuccess(result, onDone);
   const errors = result && !result.ok ? result.fieldErrors : undefined;
   const prefix = payment ? `payment-${payment.id}` : `payment-new-${memberId ?? "any"}`;
+  // React applies a <select>'s defaultValue only on mount, and the form reset after a failed action restores the option
+  // that was default-selected then. Keying each select on its default remounts it with what was submitted.
+  const memberDefault = fieldValue(result, "memberId");
+  const methodDefault = fieldValue(result, "method", payment?.method ?? "venmo");
+  const periodDefault = fieldValue(result, "periodId", payment ? (payment.periodId ?? "") : (defaultPeriodId ?? ""));
   return (
     <form action={action} className="space-y-3">
       {payment ? <input type="hidden" name="paymentId" value={payment.id} /> : null}
@@ -54,7 +59,7 @@ export function PaymentForm({
         <input type="hidden" name="memberId" value={memberId} />
       ) : (
         <Field label="Brother" htmlFor={`${prefix}-member`} required error={errors?.memberId}>
-          <MemberSelect id={`${prefix}-member`} name="memberId" members={members ?? []} required defaultValue={fieldValue(result, "memberId")} />
+          <MemberSelect key={`member-${memberDefault}`} id={`${prefix}-member`} name="memberId" members={members ?? []} required defaultValue={memberDefault} />
         </Field>
       )}
       <FormRow>
@@ -70,7 +75,7 @@ export function PaymentForm({
           />
         </Field>
         <Field label="Method" htmlFor={`${prefix}-method`} error={errors?.method}>
-          <Select id={`${prefix}-method`} name="method" defaultValue={fieldValue(result, "method", payment?.method ?? "venmo")}>
+          <Select key={`method-${methodDefault}`} id={`${prefix}-method`} name="method" defaultValue={methodDefault}>
             {PAYMENT_METHOD_OPTIONS.map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
@@ -84,7 +89,7 @@ export function PaymentForm({
           <Input id={`${prefix}-paidAt`} name="paidAt" type="date" required defaultValue={fieldValue(result, "paidAt", payment?.paidOn ?? today)} />
         </Field>
         <Field label="Period" htmlFor={`${prefix}-period`} error={errors?.periodId}>
-          <Select id={`${prefix}-period`} name="periodId" defaultValue={fieldValue(result, "periodId", payment ? (payment.periodId ?? "") : (defaultPeriodId ?? ""))}>
+          <Select key={`period-${periodDefault}`} id={`${prefix}-period`} name="periodId" defaultValue={periodDefault}>
             <option value="">No period</option>
             {periods.map((p) => (
               <option key={p.id} value={p.id}>

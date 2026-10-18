@@ -43,6 +43,11 @@ export function ChargeForm({
   useCloseOnSuccess(result, onDone);
   const errors = result && !result.ok ? result.fieldErrors : undefined;
   const prefix = charge ? `charge-${charge.id}` : `charge-new-${memberId ?? "any"}`;
+  // React applies a <select>'s defaultValue only on mount, and the form reset after a failed action restores the option
+  // that was default-selected then. Keying each select on its default remounts it with what was submitted.
+  const memberDefault = fieldValue(result, "memberId");
+  const kindDefault = fieldValue(result, "kind", charge?.kind ?? "other");
+  const periodDefault = fieldValue(result, "periodId", charge ? (charge.periodId ?? "") : (defaultPeriodId ?? ""));
   return (
     <form action={action} className="space-y-3">
       {charge ? <input type="hidden" name="chargeId" value={charge.id} /> : null}
@@ -50,12 +55,12 @@ export function ChargeForm({
         <input type="hidden" name="memberId" value={memberId} />
       ) : (
         <Field label="Brother" htmlFor={`${prefix}-member`} required error={errors?.memberId}>
-          <MemberSelect id={`${prefix}-member`} name="memberId" members={members ?? []} required defaultValue={fieldValue(result, "memberId")} />
+          <MemberSelect key={`member-${memberDefault}`} id={`${prefix}-member`} name="memberId" members={members ?? []} required defaultValue={memberDefault} />
         </Field>
       )}
       <FormRow>
         <Field label="Kind" htmlFor={`${prefix}-kind`} error={errors?.kind}>
-          <Select id={`${prefix}-kind`} name="kind" defaultValue={fieldValue(result, "kind", charge?.kind ?? "other")}>
+          <Select key={`kind-${kindDefault}`} id={`${prefix}-kind`} name="kind" defaultValue={kindDefault}>
             {CHARGE_KIND_OPTIONS.map((k) => (
               <option key={k.value} value={k.value}>
                 {k.label}
@@ -75,7 +80,7 @@ export function ChargeForm({
           <Input id={`${prefix}-dueDate`} name="dueDate" type="date" defaultValue={fieldValue(result, "dueDate", charge ? charge.dueDate : defaultDueDate)} />
         </Field>
         <Field label="Period" htmlFor={`${prefix}-period`} error={errors?.periodId}>
-          <Select id={`${prefix}-period`} name="periodId" defaultValue={fieldValue(result, "periodId", charge ? (charge.periodId ?? "") : (defaultPeriodId ?? ""))}>
+          <Select key={`period-${periodDefault}`} id={`${prefix}-period`} name="periodId" defaultValue={periodDefault}>
             <option value="">No period</option>
             {periods.map((p) => (
               <option key={p.id} value={p.id}>

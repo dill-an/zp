@@ -1,11 +1,11 @@
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
-import { Textarea } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { autoFillWeek, clearWeek, deleteWeek, setWeekPublished, updateWeekNotes } from "@/lib/actions/labor";
+import { autoFillWeek, clearWeek, deleteWeek, setWeekPublished } from "@/lib/actions/labor";
 import type { WeekGrid } from "@/lib/queries/labor";
 import { ActionForm } from "./action-form";
+import { WeekNotesForm } from "./week-notes-form";
 
 /** Manager toolbar shown in manage mode: fill, clear, publish, notes, delete. */
 export function WeekManageBar({ grid }: { grid: WeekGrid }) {
@@ -53,15 +53,7 @@ export function WeekManageBar({ grid }: { grid: WeekGrid }) {
             <span className="ml-auto text-xs text-muted">Delete is available only while nothing is done or resolved.</span>
           )}
         </div>
-        <ActionForm action={updateWeekNotes} hidden={{ weekId: week.id }} stacked showSuccess className="max-w-xl">
-          <label htmlFor="week-notes" className="block text-sm font-medium">
-            Week notes
-          </label>
-          <Textarea id="week-notes" name="notes" rows={2} defaultValue={week.notes ?? ""} placeholder="Anything brothers should know this week (inspection Sunday 6pm, supplies in the closet...)" />
-          <SubmitButton size="sm" variant="secondary" pendingText="Saving…">
-            Save notes
-          </SubmitButton>
-        </ActionForm>
+        <WeekNotesForm weekId={week.id} notes={week.notes} />
       </CardContent>
     </Card>
   );

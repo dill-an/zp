@@ -236,6 +236,15 @@ export function describeStatusChange(from: TaskStatus, to: TaskStatus): string {
   return `Moved from ${names[from]} to ${names[to]}`;
 }
 
+/**
+ * Ids among `found` that may not receive a new assignment (inactive or alumni). Ids in `keep`, the ones
+ * already on the task, stay allowed so an unrelated edit does not have to drop them first.
+ */
+export function rejectedAssignees(found: readonly { id: number; status: string }[], keep: readonly number[] = []): number[] {
+  const kept = new Set(keep);
+  return found.filter((m) => !kept.has(m.id) && (m.status === "inactive" || m.status === "alumni")).map((m) => m.id);
+}
+
 /** Which assignee ids were added and removed between two assignment lists. */
 export function diffAssignees(before: readonly number[], after: readonly number[]): { added: number[]; removed: number[] } {
   const b = new Set(before);

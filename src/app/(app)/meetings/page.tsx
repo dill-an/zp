@@ -121,7 +121,9 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
-                      {scope === "upcoming" && !excuse ? <ExcuseDialog meetingId={m.id} meetingLabel={`${m.title}, ${formatDateTime(m.scheduledAt)}`} /> : null}
+                      {scope === "upcoming" ? (
+                        <ExcuseDialog meetingId={m.id} meetingLabel={`${m.title}, ${formatDateTime(m.scheduledAt)}`} canRequest={!excuse || excuse.status === "denied"} />
+                      ) : null}
                       {manage ? (
                         <>
                           <ButtonLink variant={m.attendanceTaken ? "outline" : "secondary"} size="sm" href={`/meetings/${m.id}/attendance`}>

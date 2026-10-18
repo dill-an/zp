@@ -19,7 +19,8 @@ function SlotCell({ slot, user, colSpan }: { slot: GridRow["slots"][number]; use
     );
   }
   const mine = a.memberId === user.id;
-  const canMark = mine && a.status === "assigned";
+  // Same rule as My jobs: untracked history (before labor_tracking_start) stays neutral, no Mark done.
+  const canMark = mine && a.status === "assigned" && a.state !== "not_tracked";
   return (
     <td colSpan={colSpan} className={cn("px-2 py-2 align-top sm:px-3", mine && "bg-primary-soft/50")}>
       <div className="flex flex-col items-start gap-1">

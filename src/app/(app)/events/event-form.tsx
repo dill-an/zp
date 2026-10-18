@@ -43,6 +43,10 @@ export function EventForm({
 }) {
   const [result, formAction] = useActionState(action, null);
   const errors = result && !result.ok ? (result.fieldErrors ?? {}) : {};
+  // React applies a select's defaultValue only on mount and resets the form after the action, so each
+  // select is re-keyed by the value that comes back from a failed submit to keep what was picked.
+  const kind = fieldValue(result, "kind", initial?.kind ?? "social");
+  const chairId = fieldValue(result, "chairId", initial?.chairId);
   return (
     <form action={formAction} className="space-y-4">
       <Field label="Title" htmlFor="title" required error={errors.title}>
@@ -50,7 +54,7 @@ export function EventForm({
       </Field>
       <FormRow>
         <Field label="Kind" htmlFor="kind" required error={errors.kind}>
-          <Select id="kind" name="kind" defaultValue={fieldValue(result, "kind", initial?.kind ?? "social")}>
+          <Select key={kind} id="kind" name="kind" defaultValue={kind}>
             {kinds.map((k) => (
               <option key={k} value={k}>
                 {humanize(k)}
@@ -59,7 +63,7 @@ export function EventForm({
           </Select>
         </Field>
         <Field label="Owning chair" htmlFor="chairId" error={errors.chairId} hint="Who is running it.">
-          <Select id="chairId" name="chairId" defaultValue={fieldValue(result, "chairId", initial?.chairId)}>
+          <Select key={`chair-${chairId}`} id="chairId" name="chairId" defaultValue={chairId}>
             <option value="">No chair</option>
             {chairs.map((c) => (
               <option key={c.id} value={c.id}>

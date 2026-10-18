@@ -155,6 +155,7 @@ export async function assignChairHolder(_prev: ActionResult | null, formData: Fo
     const d = parsed.data;
     const chair = getChair(d.chairId);
     if (!chair) return fail("Not found.");
+    if (!chair.isActive) return fail(`${chair.name} is inactive. Activate the chair before assigning a holder.`);
     const member = db.select().from(members).where(eq(members.id, d.memberId)).get();
     if (!member) return fail("That brother does not exist.", { memberId: ["Not found."] }, values(formData));
     if (member.status === "inactive" || member.status === "alumni") {

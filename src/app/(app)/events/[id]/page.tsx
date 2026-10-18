@@ -102,7 +102,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
           <Card>
             <CardHeader>
               <CardTitle>Details</CardTitle>
@@ -204,7 +204,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
                         </Td>
                         <Td className="text-right">
                           <div className="flex flex-wrap justify-end gap-1">
-                            {(manage || own) && d.status !== "done" ? (
+                            {(manage ? d.status !== "done" : own && d.status === "assigned") ? (
                               <form
                                 action={async () => {
                                   "use server";
@@ -263,7 +263,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           </Card>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>RSVPs</CardTitle>

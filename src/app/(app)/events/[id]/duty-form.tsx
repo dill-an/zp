@@ -24,14 +24,17 @@ export function DutyForm({
 }) {
   const [result, action] = useActionState(addEventDuty.bind(null, eventId), null);
   const errors = result && !result.ok ? (result.fieldErrors ?? {}) : {};
+  // Selects are re-keyed by the submitted value: React applies defaultValue only on mount and resets the form after the action.
+  const memberId = fieldValue(result, "memberId");
+  const duty = fieldValue(result, "duty", "sober_monitor");
   return (
     <form action={action} className="space-y-3">
       <FormRow>
         <Field label="Brother" htmlFor="dutyMemberId" error={errors.memberId} hint="Leave empty to fill later.">
-          <MemberSelect id="dutyMemberId" name="memberId" groups={groups} placeholder="Unassigned" defaultValue={fieldValue(result, "memberId")} />
+          <MemberSelect key={`member-${memberId}`} id="dutyMemberId" name="memberId" groups={groups} placeholder="Unassigned" defaultValue={memberId} />
         </Field>
         <Field label="Duty" htmlFor="duty" required error={errors.duty}>
-          <Select id="duty" name="duty" defaultValue={fieldValue(result, "duty", "sober_monitor")}>
+          <Select key={duty} id="duty" name="duty" defaultValue={duty}>
             {dutyKinds.map((k) => (
               <option key={k} value={k}>
                 {humanize(k)}

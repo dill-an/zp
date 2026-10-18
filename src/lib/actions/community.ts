@@ -28,7 +28,7 @@ import { can, type CurrentUser } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { localInputToISO, nowISO } from "@/lib/dates";
 import { parseDollarsToCents } from "@/lib/money";
-import { isResolvedStatus, type MaintenanceStatus } from "@/lib/queries/community-logic";
+import { announcementVisible, isResolvedStatus, type MaintenanceStatus } from "@/lib/queries/community-logic";
 
 /** Checkbox inputs arrive as "on" (or nothing at all). */
 const checkbox = z
@@ -257,7 +257,7 @@ export async function removeEventDuty(dutyId: number): Promise<ActionResult> {
 const DUTY_STATUSES = ["assigned", "done", "missed"] as const;
 export type DutyStatus = (typeof DUTY_STATUSES)[number];
 
-/** Managers set any status; the assigned brother can only mark their own duty done. */
+/** Managers set any status; the assigned brother can only mark their own still-assigned duty done. */
 export async function setDutyStatus(dutyId: number, status: DutyStatus): Promise<ActionResult> {
   return runAction(async () => {
     const user = await requireUserForAction();
@@ -266,7 +266,11 @@ export async function setDutyStatus(dutyId: number, status: DutyStatus): Promise
     if (!duty) return fail("Not found.");
     const manager = can(user, "events.manage");
     const own = duty.memberId === user.id;
-    if (!manager && !(own && status === "done")) return fail("You can only mark your own duty as done.");
+    if (!manager) {
+      if (!own || status !== "done") return fail("You can only mark your own duty as done.");
+      // A verdict (missed) or an earlier done stays until an officer reopens the duty.
+      if (duty.status !== "assigned") return fail("Only an officer can change a duty that was marked missed or done.");
+    }
     db.update(eventDuties)
       .set({ status, completedAt: status === "done" ? nowISO() : null })
       .where(eq(eventDuties.id, dutyId))
@@ -295,6 +299,7 @@ function canEditAnnouncement(user: CurrentUser, a: Announcement): boolean {
 }
 
 export async function createAnnouncement(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  let landing = "/announcements";
   const result = await runAction(async () => {
     const user = await requirePermissionForAction("announcements.post");
     const parsed = parseForm(announcementSchema, formData);
@@ -307,13 +312,23 @@ export async function createAnnouncement(_prev: ActionResult | null, formData: F
       .get();
     logAudit({ actorId: user.id, action: "announcement.create", entityType: "announcement", entityId: row.id, summary: `${user.username} posted "${d.title}" to ${d.audience}` });
     revalidateAnnouncements();
+    landing = announcementLanding(user, d);
     return ok("Announcement posted.", row.id);
   });
-  if (result.ok) redirect("/announcements");
+  if (result.ok) redirect(landing);
   return result;
 }
 
+/**
+ * Where to send a poster after saving: the "For me" list when the post shows there, otherwise "All posts",
+ * so a post to another audience (or one that already expired) does not look like it vanished.
+ */
+function announcementLanding(user: CurrentUser, a: { audience: Announcement["audience"]; expiresAt?: string | null }): string {
+  return announcementVisible({ audience: a.audience, expiresAt: a.expiresAt ?? null }, user) ? "/announcements" : "/announcements?all=1";
+}
+
 export async function updateAnnouncement(id: number, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  let landing = "/announcements";
   const result = await runAction(async () => {
     const user = await requirePermissionForAction("announcements.post");
     const existing = db.select().from(announcements).where(eq(announcements.id, id)).get();
@@ -328,9 +343,10 @@ export async function updateAnnouncement(id: number, _prev: ActionResult | null,
       .run();
     logAudit({ actorId: user.id, action: "announcement.update", entityType: "announcement", entityId: id, summary: `${user.username} edited announcement "${d.title}"` });
     revalidateAnnouncements();
+    landing = announcementLanding(user, d);
     return ok("Announcement saved.", id);
   });
-  if (result.ok) redirect("/announcements");
+  if (result.ok) redirect(landing);
   return result;
 }
 
@@ -347,13 +363,14 @@ export async function deleteAnnouncement(id: number): Promise<ActionResult> {
   });
 }
 
-export async function toggleAnnouncementPin(id: number): Promise<ActionResult> {
+/** Pin or unpin. Takes the target state (not a toggle) so a double submit cannot undo itself. */
+export async function setAnnouncementPinned(id: number, isPinned: boolean): Promise<ActionResult> {
   return runAction(async () => {
     const user = await requirePermissionForAction("announcements.post");
     const existing = db.select().from(announcements).where(eq(announcements.id, id)).get();
     if (!existing) return fail("Not found.");
     if (!canEditAnnouncement(user, existing)) return fail("Only the author or an admin can pin this.");
-    const isPinned = !existing.isPinned;
+    if (existing.isPinned === isPinned) return ok(isPinned ? "Pinned." : "Unpinned.");
     db.update(announcements).set({ isPinned, updatedAt: nowISO() }).where(eq(announcements.id, id)).run();
     logAudit({ actorId: user.id, action: isPinned ? "announcement.pin" : "announcement.unpin", entityType: "announcement", entityId: id, summary: `${user.username} ${isPinned ? "pinned" : "unpinned"} "${existing.title}"` });
     revalidateAnnouncements();
@@ -495,7 +512,10 @@ const statusFormSchema = z.object({
 export async function changeMaintenanceStatus(id: number, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   const parsed = parseForm(statusFormSchema, formData);
   if ("result" in parsed) return parsed.result;
-  return setMaintenanceStatus(id, parsed.data.status, parsed.data.resolutionNotes ?? null);
+  // Only a form that carries the notes field may change the notes (the list card's form has none);
+  // an emptied field still clears them.
+  const notes = formData.has("resolutionNotes") ? (parsed.data.resolutionNotes ?? "") : undefined;
+  return setMaintenanceStatus(id, parsed.data.status, notes);
 }
 
 export async function deleteMaintenanceRequest(id: number): Promise<ActionResult> {

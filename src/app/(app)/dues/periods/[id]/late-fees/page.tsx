@@ -4,6 +4,7 @@ import { MemberLink } from "@/components/member-link";
 import { requirePermission } from "@/lib/auth";
 import { dueDescription, formatDate } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
+import { displayName } from "@/lib/names";
 import { applyLateFees } from "@/lib/actions/dues";
 import { getLateFeePreview } from "@/lib/queries/dues";
 import { RunForm } from "../../../_components/run-form";
@@ -17,7 +18,7 @@ export default async function LateFeesPage({ params }: { params: Promise<{ id: s
   if (!Number.isInteger(periodId) || periodId <= 0) notFound();
   const preview = getLateFeePreview(periodId);
   if (!preview) notFound();
-  const { period, toCharge, alreadyCharged, totalCents, isPastDue } = preview;
+  const { period, toCharge, alreadyCharged, notYetDue, totalCents, isPastDue } = preview;
   const noFee = period.lateFeeCents <= 0;
   const canRun = !noFee && isPastDue && toCharge.length > 0;
   const blocker = noFee
@@ -25,7 +26,9 @@ export default async function LateFeesPage({ params }: { params: Promise<{ id: s
     : !isPastDue
       ? `${period.name} is not past due yet (${dueDescription(period.dueDate)}). Late fees can be applied from the day after the due date.`
       : toCharge.length === 0
-        ? "Nobody needs a late fee: everyone who still owes money already has one."
+        ? notYetDue.length > 0
+          ? "Nobody needs a late fee: everyone who is overdue already has one, and the rest are not late yet."
+          : "Nobody needs a late fee: everyone who still owes money already has one."
         : null;
 
   return (
@@ -33,7 +36,7 @@ export default async function LateFeesPage({ params }: { params: Promise<{ id: s
       <PageHeader
         eyebrow="Apply late fees"
         title={period.name}
-        description={`Adds a ${formatCents(period.lateFeeCents)} late fee to every current brother who still owes money for ${period.name} after ${formatDate(period.dueDate, { year: true })} and has not been charged one yet.`}
+        description={`Adds a ${formatCents(period.lateFeeCents)} late fee to every current brother who is overdue for ${period.name} after ${formatDate(period.dueDate, { year: true })} and has not been charged one yet. A brother on an approved payment plan is only charged once an installment is late.`}
         actions={
           <ButtonLink href="/dues/periods" variant="ghost">
             Periods
@@ -50,9 +53,16 @@ export default async function LateFeesPage({ params }: { params: Promise<{ id: s
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Late fee" value={formatCents(period.lateFeeCents)} />
         <Stat label="Due date" value={formatDate(period.dueDate)} hint={dueDescription(period.dueDate)} />
-        <Stat label="To charge" value={toCharge.length} hint={`${alreadyCharged.length} already charged`} />
+        <Stat label="To charge" value={toCharge.length} hint={`${alreadyCharged.length} already charged${notYetDue.length > 0 ? `, ${notYetDue.length} not yet due` : ""}`} />
         <Stat label="Total" value={formatCents(totalCents)} />
       </div>
+
+      {notYetDue.length > 0 ? (
+        <p role="status" className="mb-4 rounded-md bg-info-soft px-3 py-2 text-sm text-info" data-testid="late-fee-not-yet-due">
+          Not charged (still owing, but nothing is late yet):{" "}
+          {notYetDue.map((r) => `${displayName(r.member)} (${formatCents(r.balanceCents)}${r.nextDueDate ? `, next due ${formatDate(r.nextDueDate)}` : ""})`).join(", ")}.
+        </p>
+      ) : null}
 
       <Card className="mb-5">
         <CardHeader>
@@ -74,7 +84,7 @@ export default async function LateFeesPage({ params }: { params: Promise<{ id: s
       </Card>
 
       {toCharge.length === 0 ? (
-        <EmptyState title="Nobody to charge" description="No current brother owes money for this period without a late fee." />
+        <EmptyState title="Nobody to charge" description="No current brother is overdue for this period without a late fee." />
       ) : (
         <Card>
           <Table>

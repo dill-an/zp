@@ -6,7 +6,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { CHARGE_KINDS, PAYMENT_METHODS, charges, duesPeriods, paymentPlans, payments } from "@/db/schema";
-import { fail, ok, parseForm, runAction, type ActionResult } from "@/lib/action-result";
+import { fail, formValues, ok, parseForm, runAction, type ActionResult } from "@/lib/action-result";
 import { requirePermissionForAction } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { dateAtLocalTime, todayISO } from "@/lib/dates";
@@ -97,7 +97,7 @@ export async function recordPayment(_prev: ActionResult | null, formData: FormDa
     const parsed = parseForm(recordPaymentSchema, formData);
     if ("result" in parsed) return parsed.result;
     const { memberId, periodId, amount, method, paidAt, reference, notes } = parsed.data;
-    if (amount <= 0) return fail("The amount must be more than $0.", { amount: ["Must be more than $0."] });
+    if (amount <= 0) return fail("The amount must be more than $0.", { amount: ["Must be more than $0."] }, formValues(formData));
     const member = getMember(memberId);
     if (!member) return fail("Not found.");
     if (periodId != null && !getPeriod(periodId)) return fail("Not found.");
@@ -126,7 +126,7 @@ export async function updatePayment(_prev: ActionResult | null, formData: FormDa
     const parsed = parseForm(updatePaymentSchema, formData);
     if ("result" in parsed) return parsed.result;
     const { paymentId, periodId, amount, method, paidAt, reference, notes } = parsed.data;
-    if (amount <= 0) return fail("The amount must be more than $0.", { amount: ["Must be more than $0."] });
+    if (amount <= 0) return fail("The amount must be more than $0.", { amount: ["Must be more than $0."] }, formValues(formData));
     const existing = getPayment(paymentId);
     if (!existing) return fail("Not found.");
     if (periodId != null && !getPeriod(periodId)) return fail("Not found.");
@@ -186,7 +186,7 @@ export async function addCharge(_prev: ActionResult | null, formData: FormData):
     const parsed = parseForm(addChargeSchema, formData);
     if ("result" in parsed) return parsed.result;
     const { memberId, periodId, kind, description, amount, dueDate } = parsed.data;
-    if (amount === 0) return fail("The amount cannot be $0.", { amount: ["Cannot be $0."] });
+    if (amount === 0) return fail("The amount cannot be $0.", { amount: ["Cannot be $0."] }, formValues(formData));
     const member = getMember(memberId);
     if (!member) return fail("Not found.");
     if (periodId != null && !getPeriod(periodId)) return fail("Not found.");
@@ -215,7 +215,7 @@ export async function updateCharge(_prev: ActionResult | null, formData: FormDat
     const parsed = parseForm(updateChargeSchema, formData);
     if ("result" in parsed) return parsed.result;
     const { chargeId, periodId, kind, description, amount, dueDate } = parsed.data;
-    if (amount === 0) return fail("The amount cannot be $0.", { amount: ["Cannot be $0."] });
+    if (amount === 0) return fail("The amount cannot be $0.", { amount: ["Cannot be $0."] }, formValues(formData));
     const existing = getCharge(chargeId);
     if (!existing) return fail("Not found.");
     if (periodId != null && !getPeriod(periodId)) return fail("Not found.");
@@ -269,10 +269,11 @@ const periodFields = {
   notes: optionalText,
 };
 
-function validatePeriodAmounts(data: { amount: number; newMemberAmount: number | null; lateFee: number | null }): ActionResult | null {
-  if (data.amount < 0) return fail("The dues amount cannot be negative.", { amount: ["Cannot be negative."] });
-  if (data.newMemberAmount != null && data.newMemberAmount < 0) return fail("The new member amount cannot be negative.", { newMemberAmount: ["Cannot be negative."] });
-  if (data.lateFee != null && data.lateFee < 0) return fail("The late fee cannot be negative.", { lateFee: ["Cannot be negative."] });
+function validatePeriodAmounts(data: { amount: number; newMemberAmount: number | null; lateFee: number | null }, formData: FormData): ActionResult | null {
+  const values = formValues(formData);
+  if (data.amount < 0) return fail("The dues amount cannot be negative.", { amount: ["Cannot be negative."] }, values);
+  if (data.newMemberAmount != null && data.newMemberAmount < 0) return fail("The new member amount cannot be negative.", { newMemberAmount: ["Cannot be negative."] }, values);
+  if (data.lateFee != null && data.lateFee < 0) return fail("The late fee cannot be negative.", { lateFee: ["Cannot be negative."] }, values);
   return null;
 }
 
@@ -281,7 +282,7 @@ export async function createPeriod(_prev: ActionResult | null, formData: FormDat
     const user = await requirePermissionForAction("dues.manage");
     const parsed = parseForm(z.object(periodFields), formData);
     if ("result" in parsed) return parsed.result;
-    const invalid = validatePeriodAmounts(parsed.data);
+    const invalid = validatePeriodAmounts(parsed.data, formData);
     if (invalid) return invalid;
     const { name, amount, newMemberAmount, dueDate, lateFee, isActive, notes } = parsed.data;
     const active = !!isActive;
@@ -304,7 +305,7 @@ export async function createPeriod(_prev: ActionResult | null, formData: FormDat
       revalidateDues();
       return ok(`Created ${name}.`, row.id);
     } catch (err) {
-      if (isUniqueViolation(err)) return fail("A period with that name already exists.", { name: ["Already exists."] });
+      if (isUniqueViolation(err)) return fail("A period with that name already exists.", { name: ["Already exists."] }, formValues(formData));
       throw err;
     }
   });
@@ -315,12 +316,16 @@ export async function updatePeriod(_prev: ActionResult | null, formData: FormDat
     const user = await requirePermissionForAction("dues.manage");
     const parsed = parseForm(z.object({ periodId: id, ...periodFields }), formData);
     if ("result" in parsed) return parsed.result;
-    const invalid = validatePeriodAmounts(parsed.data);
+    const invalid = validatePeriodAmounts(parsed.data, formData);
     if (invalid) return invalid;
     const { periodId, name, amount, newMemberAmount, dueDate, lateFee, isActive, notes } = parsed.data;
     const existing = getPeriod(periodId);
     if (!existing) return fail("Not found.");
     const active = !!isActive;
+    // A new due date also moves the dues charges billed for this period that still carry the old one,
+    // so brothers and the dashboard do not keep showing the old date as overdue.
+    const moveCharges = dueDate !== existing.dueDate;
+    let movedCount = 0;
     try {
       db.transaction((tx) => {
         if (active) tx.update(duesPeriods).set({ isActive: false }).where(and(eq(duesPeriods.isActive, true), ne(duesPeriods.id, periodId))).run();
@@ -328,9 +333,16 @@ export async function updatePeriod(_prev: ActionResult | null, formData: FormDat
           .set({ name, amountCents: amount, newMemberAmountCents: newMemberAmount, dueDate, lateFeeCents: lateFee ?? 0, isActive: active, notes: notes || null })
           .where(eq(duesPeriods.id, periodId))
           .run();
+        if (moveCharges) {
+          movedCount = tx
+            .update(charges)
+            .set({ dueDate })
+            .where(and(eq(charges.periodId, periodId), eq(charges.kind, "dues"), eq(charges.dueDate, existing.dueDate)))
+            .run().changes;
+        }
       });
     } catch (err) {
-      if (isUniqueViolation(err)) return fail("A period with that name already exists.", { name: ["Already exists."] });
+      if (isUniqueViolation(err)) return fail("A period with that name already exists.", { name: ["Already exists."] }, formValues(formData));
       throw err;
     }
     logAudit({
@@ -338,7 +350,7 @@ export async function updatePeriod(_prev: ActionResult | null, formData: FormDat
       action: "dues.period.update",
       entityType: "dues_period",
       entityId: periodId,
-      summary: `${user.username} updated dues period "${name}" (${formatCents(amount)}, due ${dueDate}, ${active ? "active" : "inactive"})`,
+      summary: `${user.username} updated dues period "${name}" (${formatCents(amount)}, due ${dueDate}, ${active ? "active" : "inactive"})${movedCount > 0 ? `; moved ${movedCount} dues charges to the new due date` : ""}`,
     });
     revalidateDues();
     return ok(`Saved ${name}.`, periodId);
@@ -358,7 +370,7 @@ export async function billPeriod(_prev: ActionResult | null, formData: FormData)
     if (!preview) return fail("Not found.");
     const { period, toBill } = preview;
     if (period.amountCents === 0) return fail(`${period.name} has a dues amount of $0. Set the amount under Periods before billing.`);
-    if (toBill.length === 0) return fail("Everyone is already billed for this period.");
+    if (toBill.length === 0) return fail(preview.skipped.length > 0 ? "Nobody to bill: everyone is already billed or has a $0 amount." : "Everyone is already billed for this period.");
     const description = `${period.name} dues`;
     db.transaction((tx) => {
       for (const { member, amountCents } of toBill) {
@@ -389,7 +401,7 @@ export async function applyLateFees(_prev: ActionResult | null, formData: FormDa
     const { period, toCharge, isPastDue } = preview;
     if (period.lateFeeCents <= 0) return fail(`${period.name} has no late fee set. Set one under Periods first.`);
     if (!isPastDue) return fail(`${period.name} is not past due yet (due ${period.dueDate}).`);
-    if (toCharge.length === 0) return fail("Nobody needs a late fee: everyone who owes money already has one.");
+    if (toCharge.length === 0) return fail("Nobody needs a late fee: everyone who is overdue already has one.");
     const today = todayISO();
     db.transaction((tx) => {
       for (const { member } of toCharge) {
@@ -439,21 +451,22 @@ export async function createPaymentPlan(_prev: ActionResult | null, formData: Fo
     const periodId = data.periodId ?? null;
     const period = periodId != null ? getPeriod(periodId) : null;
     if (periodId != null && !period) return fail("Not found.");
+    const values = formValues(formData);
     const balance = getMemberBalance(member.id, periodId);
-    if (balance.balanceCents <= 0) return fail(`${displayName(member)} has nothing outstanding${period ? ` for ${period.name}` : ""}.`);
+    if (balance.balanceCents <= 0) return fail(`${displayName(member)} has nothing outstanding${period ? ` for ${period.name}` : ""}.`, undefined, values);
     const openPlans = db
       .select()
       .from(paymentPlans)
       .where(eq(paymentPlans.memberId, member.id))
       .all()
       .filter((p) => (p.periodId ?? null) === periodId && (p.status === "proposed" || p.status === "approved"));
-    if (openPlans.length > 0) return fail(`${displayName(member)} already has an open plan${period ? ` for ${period.name}` : ""}. Cancel it first.`);
+    if (openPlans.length > 0) return fail(`${displayName(member)} already has an open plan${period ? ` for ${period.name}` : ""}. Cancel it first.`, undefined, values);
     const rows = Array.from({ length: PLAN_ROWS }, (_, i) => ({
       dueDate: (data[`due_${i + 1}`] as string | undefined) ?? "",
       amount: (data[`amount_${i + 1}`] as string | undefined) ?? "",
     }));
     const installments = parseInstallments(rows, { totalCents: balance.balanceCents });
-    if (!installments.ok) return fail(installments.error);
+    if (!installments.ok) return fail(installments.error, undefined, values);
     const row = db
       .insert(paymentPlans)
       .values({ memberId: member.id, periodId, installmentsJson: JSON.stringify(installments.installments), status: "proposed", notes: data.notes || null })

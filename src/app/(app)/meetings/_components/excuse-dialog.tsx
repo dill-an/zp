@@ -34,16 +34,21 @@ function ExcuseForm({ meetingId, close }: { meetingId: number; close: () => void
   );
 }
 
-/** "Request excuse" button that opens a small dialog. */
-export function ExcuseDialog({ meetingId, meetingLabel, variant = "outline", size = "sm", label = "Request excuse" }: {
+/**
+ * "Request excuse" button that opens a small dialog. Keep it mounted while the member has a request on file and
+ * pass `canRequest={false}`: the trigger hides, but an open dialog survives the revalidation that follows a
+ * successful request, so the brother sees the confirmation instead of the modal vanishing.
+ */
+export function ExcuseDialog({ meetingId, meetingLabel, canRequest = true, variant = "outline", size = "sm", label = "Request excuse" }: {
   meetingId: number;
   meetingLabel: string;
+  canRequest?: boolean;
   variant?: ButtonVariant;
   size?: ButtonSize;
   label?: string;
 }) {
   return (
-    <Dialog trigger={label} triggerVariant={variant} triggerSize={size} title={`Request excuse: ${meetingLabel}`}>
+    <Dialog trigger={label} triggerVariant={variant} triggerSize={size} triggerClassName={canRequest ? undefined : "hidden"} title={`Request excuse: ${meetingLabel}`}>
       {(close) => <ExcuseForm meetingId={meetingId} close={close} />}
     </Dialog>
   );

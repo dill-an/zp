@@ -13,6 +13,7 @@ import {
   nextOccurrenceDue,
   parseChecklistText,
   parseTags,
+  rejectedAssignees,
   serializeTags,
   sortTasks,
   statusActions,
@@ -235,5 +236,24 @@ describe("activity helpers", () => {
   it("diffs assignee lists", () => {
     expect(diffAssignees([1, 2, 3], [2, 3, 4])).toEqual({ added: [4], removed: [1] });
     expect(diffAssignees([], [])).toEqual({ added: [], removed: [] });
+  });
+});
+
+describe("rejectedAssignees", () => {
+  const found = [
+    { id: 1, status: "active" },
+    { id: 2, status: "inactive" },
+    { id: 3, status: "alumni" },
+    { id: 4, status: "new" },
+  ];
+  it("rejects inactive and alumni brothers who are not on the task yet", () => {
+    expect(rejectedAssignees(found)).toEqual([2, 3]);
+    expect(rejectedAssignees([])).toEqual([]);
+  });
+  it("keeps assignees already on the task even though they are no longer active", () => {
+    // An officer editing only the description must not be forced to untick them first.
+    expect(rejectedAssignees(found, [2, 3])).toEqual([]);
+    expect(rejectedAssignees(found, [2])).toEqual([3]);
+    expect(rejectedAssignees(found, [1, 4])).toEqual([2, 3]);
   });
 });

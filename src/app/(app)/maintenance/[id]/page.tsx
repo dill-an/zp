@@ -113,7 +113,7 @@ export default async function MaintenanceRequestPage({ params }: { params: Promi
               <CardHeader>
                 <CardTitle>Resolution</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent data-testid="resolution-notes">
                 <Paragraphs text={r.resolutionNotes} empty="No notes were left." />
               </CardContent>
             </Card>

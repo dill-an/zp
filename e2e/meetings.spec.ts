@@ -117,8 +117,8 @@ test("admin creates a meeting, takes attendance and the meeting page shows count
   await expect(page.locator('[data-testid="attendance-row"]', { hasText: BROTHER.name })).toContainText("Absent");
   await expect(page.locator('[data-testid="attendance-row"]', { hasText: ADMIN.name })).toContainText("Present");
 
-  // The list and the grid pick the new meeting up.
-  await go(page, "/meetings?tab=past&kind=house");
+  // The meeting is tomorrow, so the list shows it under Upcoming with its counts once attendance is taken.
+  await go(page, "/meetings?kind=house");
   const listRow = page.locator('[data-testid="meeting-row"]', { hasText: title });
   await expect(listRow).toContainText("1 absent");
   await expect(listRow.getByRole("link", { name: "Edit attendance" })).toBeVisible();
@@ -180,6 +180,15 @@ test("Fine absences previews the absent member and creates a charge", async ({ p
   await go(page, `/meetings/${id}`);
   await expect(page.getByTestId("fine-panel").getByRole("button", { name: /Fine/ })).toHaveCount(0);
 
+  // Fixing a typo in the title afterwards must not make the absentee fineable again.
+  await go(page, `/meetings/${id}/edit`);
+  await page.fill("#title", `${title} (typo fixed)`);
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.waitForURL(new RegExp(`/meetings/${id}$`));
+  await expect(page.locator("h1")).toHaveText(`${title} (typo fixed)`);
+  await expect(page.getByTestId("fine-panel")).toContainText("Every absence for this meeting has been fined.");
+  await expect(page.getByTestId("fine-panel").getByRole("button", { name: /Fine/ })).toHaveCount(0);
+
   // The dues module (another team) lists the charge when it exists.
   const dues = await page.goto(`/dues/members/${memberId}`, { waitUntil: "load" }).catch(() => null);
   if (dues && dues.status() === 200 && !(await page.getByText("Coming soon").isVisible().catch(() => false))) {
@@ -187,22 +196,151 @@ test("Fine absences previews the absent member and creates a charge", async ({ p
   }
 });
 
+/** "YYYY-MM-DD" N days from now (UTC calendar date; fine for date inputs). */
+const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+type SeriesInput = { title: string; kind: string; weekday: string; time: string; first: string; last: string; location?: string };
+
+async function fillSeries(page: Page, s: SeriesInput) {
+  await page.fill("#series-title", s.title);
+  await page.selectOption("#series-kind", s.kind);
+  await page.selectOption("#series-weekday", s.weekday);
+  await page.fill("#series-time", s.time);
+  await page.fill("#series-first", s.first);
+  await page.fill("#series-last", s.last);
+  if (s.location !== undefined) await page.fill("#series-location", s.location);
+}
+
+async function expectSeries(page: Page, s: SeriesInput) {
+  await expect(page.locator("#series-title")).toHaveValue(s.title);
+  await expect(page.locator("#series-kind")).toHaveValue(s.kind);
+  await expect(page.locator("#series-weekday")).toHaveValue(s.weekday);
+  await expect(page.locator("#series-time")).toHaveValue(s.time);
+  await expect(page.locator("#series-first")).toHaveValue(s.first);
+  await expect(page.locator("#series-last")).toHaveValue(s.last);
+  if (s.location !== undefined) await expect(page.locator("#series-location")).toHaveValue(s.location);
+}
+
 test("admin creates a weekly series and re-running it skips existing dates", async ({ page }) => {
   await signIn(page, ADMIN);
   await go(page, "/meetings/new");
-  const title = uniq("Committee");
-  const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
-  await page.fill("#series-title", title);
-  await page.selectOption("#series-kind", "committee");
-  await page.selectOption("#series-weekday", "1");
-  await page.fill("#series-time", "18:30");
-  await page.fill("#series-first", day(1));
-  await page.fill("#series-last", day(7));
+  const series = { title: uniq("Committee"), kind: "committee", weekday: "1", time: "18:30", first: day(1), last: day(7) };
+  await fillSeries(page, series);
   await page.getByRole("button", { name: "Create series" }).click();
   await expect(page.getByText(/Created \d+ meeting/)).toBeVisible();
 
+  // A successful submit resets the form, so re-running the series means filling in the same values again.
+  await fillSeries(page, series);
   await page.getByRole("button", { name: "Create series" }).click();
   await expect(page.getByText(/Created 0 meetings, skipped \d+/)).toBeVisible();
+});
+
+test("forms keep what was typed when the server rejects the submission", async ({ page }) => {
+  await signIn(page, ADMIN);
+  await go(page, "/meetings/new");
+
+  // Weekly series: the last date is before the first date.
+  const bad: SeriesInput = { title: uniq("Series"), kind: "committee", weekday: "3", time: "18:15", first: day(10), last: day(3), location: "Library" };
+  await fillSeries(page, bad);
+  await page.getByRole("button", { name: "Create series" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "The last date must be on or after the first date." })).toBeVisible();
+  await expectSeries(page, bad);
+
+  // Weekly series: no date on that weekday inside a two-day window.
+  const none: SeriesInput = { ...bad, last: day(11), weekday: String((new Date(Date.now() + 10 * 86_400_000).getUTCDay() + 3) % 7) };
+  await fillSeries(page, none);
+  await page.getByRole("button", { name: "Create series" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "No dates fall on that weekday" })).toBeVisible();
+  await expectSeries(page, none);
+
+  // Single meeting: the agenda limit is only enforced server-side, and the kind must survive the round trip.
+  await page.fill("#title", uniq("Exec"));
+  await page.selectOption("#kind", "exec");
+  await page.fill("#location", "Library");
+  await page.fill("#agenda", "x".repeat(5001));
+  await page.getByRole("button", { name: "Create meeting" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: /Agenda/ })).toBeVisible();
+  await expect(page.locator("#kind")).toHaveValue("exec");
+  await expect(page.locator("#location")).toHaveValue("Library");
+});
+
+test("approving an excuse after attendance keeps who recorded it and replaces the officer note", async ({ browser }) => {
+  const admin = await newPage(browser);
+  await signIn(admin.page, ADMIN);
+  const title = uniq("Late excuse");
+  const id = await createMeeting(admin.page, title, 2);
+  await go(admin.page, `/meetings/${id}/attendance`);
+  await admin.page.getByRole("button", { name: "Mark everyone present" }).click();
+  const sheetRow = admin.page.locator("li[data-member-id]", { hasText: BROTHER.name });
+  await sheetRow.locator('label[title="Absent"]').click();
+  await sheetRow.getByRole("button", { name: "Add note" }).click();
+  await sheetRow.getByLabel(`Note for ${BROTHER.name}`).fill("No show");
+  await admin.page.getByRole("button", { name: "Save attendance" }).click();
+  await admin.page.waitForURL(new RegExp(`/meetings/${id}\\?saved=attendance`));
+  const recorded = admin.page.locator("p", { hasText: /^Recorded .* by / });
+  await expect(recorded).toContainText(ADMIN.name);
+  const recordedLine = (await recorded.textContent())!;
+
+  const brother = await newPage(browser);
+  await signIn(brother.page, BROTHER);
+  await go(brother.page, `/meetings/${id}`);
+  await expect(brother.page.locator('[data-testid="attendance-row"]', { hasText: BROTHER.name })).toContainText("No show");
+  await brother.page.getByRole("button", { name: "Request excuse" }).click();
+  const reason = uniq("Sick");
+  await brother.page.fill(`#excuse-reason-${id}`, reason);
+  await brother.page.getByRole("button", { name: "Send request" }).click();
+  await expect(brother.page.getByText("Excuse requested.")).toBeVisible();
+  await brother.page.getByRole("button", { name: "Done" }).click();
+  await brother.ctx.close();
+
+  await go(admin.page, "/meetings/excuses");
+  const pending = admin.page.locator('[data-testid="pending-excuse"]', { hasText: reason });
+  await expect(pending).toContainText("attendance taken");
+  await pending.getByRole("button", { name: "Approve" }).click();
+  await expect(pending).toHaveCount(0);
+
+  await go(admin.page, `/meetings/${id}`);
+  const row = admin.page.locator('[data-testid="attendance-row"]', { hasText: BROTHER.name });
+  await expect(row).toContainText("Excused");
+  await expect(row).toContainText("Excuse approved");
+  await expect(row).not.toContainText("No show");
+  await expect(admin.page.locator("p", { hasText: /^Recorded .* by / })).toHaveText(recordedLine);
+  await admin.ctx.close();
+});
+
+test("a denied excuse can be requested again from the meetings list", async ({ browser }) => {
+  const admin = await newPage(browser);
+  await signIn(admin.page, ADMIN);
+  const title = uniq("Deniable");
+  const id = await createMeeting(admin.page, title, 4);
+
+  const brother = await newPage(browser);
+  await signIn(brother.page, BROTHER);
+  await go(brother.page, "/meetings");
+  const row = brother.page.locator('[data-testid="meeting-row"]', { hasText: title });
+  await row.getByRole("button", { name: "Request excuse" }).click();
+  const reason = uniq("Travel");
+  await brother.page.fill(`#excuse-reason-${id}`, reason);
+  await brother.page.getByRole("button", { name: "Send request" }).click();
+  await expect(brother.page.getByText("Excuse requested.")).toBeVisible();
+  await brother.page.getByRole("button", { name: "Done" }).click();
+  await expect(row).toContainText("Pending");
+  await expect(row.getByRole("button", { name: "Request excuse" })).toBeHidden();
+
+  await go(admin.page, "/meetings/excuses");
+  const pending = admin.page.locator('[data-testid="pending-excuse"]', { hasText: reason });
+  await pending.getByPlaceholder("Note (optional)").fill("Not this time");
+  await pending.getByRole("button", { name: "Deny" }).click();
+  await expect(pending).toHaveCount(0);
+  await admin.ctx.close();
+
+  await go(brother.page, "/meetings");
+  await expect(row).toContainText("Denied");
+  await expect(row.getByRole("button", { name: "Request excuse" })).toBeVisible();
+  await go(brother.page, `/meetings/${id}`);
+  await expect(brother.page.getByText("Not this time")).toBeVisible();
+  await expect(brother.page.getByRole("button", { name: "Request excuse" })).toBeVisible();
+  await brother.ctx.close();
 });
 
 test("plain brother cannot take attendance or create meetings", async ({ page }) => {

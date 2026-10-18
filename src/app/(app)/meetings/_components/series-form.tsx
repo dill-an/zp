@@ -21,6 +21,9 @@ export function SeriesForm({ defaultWeekday, defaultTime, defaultFirstDate, defa
 }) {
   const [result, action] = useActionState(createMeetingSeries, null);
   const mandatoryDefault = result && !result.ok && result.values ? result.values.isMandatory === "on" : true;
+  // React applies a select's defaultValue only on mount, so the selects are re-keyed by the value coming back from a failed submit.
+  const kind = fieldValue(result, "kind", "house");
+  const weekday = fieldValue(result, "weekday", defaultWeekday);
   return (
     <form action={action} className="space-y-4">
       <FormRow>
@@ -28,7 +31,7 @@ export function SeriesForm({ defaultWeekday, defaultTime, defaultFirstDate, defa
           <Input id="series-title" name="title" required maxLength={120} defaultValue={fieldValue(result, "title", "House Meeting")} />
         </Field>
         <Field label="Kind" htmlFor="series-kind" error={fieldErrors(result, "kind")}>
-          <Select id="series-kind" name="kind" defaultValue={fieldValue(result, "kind", "house")}>
+          <Select key={kind} id="series-kind" name="kind" defaultValue={kind}>
             {MEETING_KINDS.map((k) => (
               <option key={k} value={k}>
                 {MEETING_KIND_LABELS[k]}
@@ -39,7 +42,7 @@ export function SeriesForm({ defaultWeekday, defaultTime, defaultFirstDate, defa
       </FormRow>
       <FormRow>
         <Field label="Weekday" htmlFor="series-weekday" error={fieldErrors(result, "weekday")}>
-          <Select id="series-weekday" name="weekday" defaultValue={fieldValue(result, "weekday", defaultWeekday)}>
+          <Select key={weekday} id="series-weekday" name="weekday" defaultValue={weekday}>
             {[0, 1, 2, 3, 4, 5, 6].map((d) => (
               <option key={d} value={d}>
                 {dayName(d)}

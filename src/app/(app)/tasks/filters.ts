@@ -31,9 +31,12 @@ function num(v: string | undefined): number | undefined {
 
 /** Parse `/tasks` search params. Links from other modules (`?chair=`, `?assignee=`) land on the Open tab. */
 export function parseFilters(sp: SearchParams): ParsedFilters {
+  const tabRaw = str(sp, "tab");
+  const tabParam = tabRaw && (TABS as readonly string[]).includes(tabRaw) ? (tabRaw as Tab) : undefined;
   const chairParam = str(sp, "chair");
   const chairId = chairParam === "general" ? ("general" as const) : num(chairParam);
-  const assigneeId = num(str(sp, "assignee"));
+  // Mine always means "assigned to me", so an assignee filter there would only count as an invisible active filter.
+  const assigneeId = tabParam === "mine" ? undefined : num(str(sp, "assignee"));
   const statusRaw = str(sp, "status");
   const status =
     statusRaw && ([...TASK_STATUSES, "open", "overdue", "closed"] as string[]).includes(statusRaw) ? (statusRaw as TaskStatusFilter) : undefined;
@@ -41,8 +44,7 @@ export function parseFilters(sp: SearchParams): ParsedFilters {
   const priority = priorityRaw && (TASK_PRIORITIES as readonly string[]).includes(priorityRaw) ? (priorityRaw as TaskPriority) : undefined;
   const q = str(sp, "q")?.slice(0, 100);
   const active = chairId !== undefined || assigneeId !== undefined || status !== undefined || priority !== undefined || q !== undefined;
-  const tabRaw = str(sp, "tab");
-  const tab: Tab = tabRaw && (TABS as readonly string[]).includes(tabRaw) ? (tabRaw as Tab) : active ? "open" : "mine";
+  const tab: Tab = tabParam ?? (active ? "open" : "mine");
   return {
     tab,
     chairParam: chairId === undefined ? undefined : chairParam,
@@ -56,12 +58,12 @@ export function parseFilters(sp: SearchParams): ParsedFilters {
   };
 }
 
-/** Href for a tab that keeps the current filters. */
+/** Href for a tab that keeps the current filters (except the assignee on Mine, which is always the current user). */
 export function tabHref(tab: Tab, f: ParsedFilters): string {
   const p = new URLSearchParams();
   p.set("tab", tab);
   if (f.chairParam) p.set("chair", f.chairParam);
-  if (f.assigneeId) p.set("assignee", String(f.assigneeId));
+  if (f.assigneeId && tab !== "mine") p.set("assignee", String(f.assigneeId));
   if (f.status) p.set("status", f.status);
   if (f.priority) p.set("priority", f.priority);
   if (f.q) p.set("q", f.q);

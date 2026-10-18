@@ -4,6 +4,7 @@ import { MemberLink } from "@/components/member-link";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
+import { displayName } from "@/lib/names";
 import { billPeriod } from "@/lib/actions/dues";
 import { getBillPreview } from "@/lib/queries/dues";
 import { RunForm } from "../../../_components/run-form";
@@ -17,9 +18,10 @@ export default async function BillPage({ params }: { params: Promise<{ id: strin
   if (!Number.isInteger(periodId) || periodId <= 0) notFound();
   const preview = getBillPreview(periodId);
   if (!preview) notFound();
-  const { period, toBill, alreadyBilled, totalCents } = preview;
+  const { period, toBill, alreadyBilled, skipped, totalCents } = preview;
   const amountIsZero = period.amountCents === 0;
   const canBill = !amountIsZero && toBill.length > 0;
+  const skippedNames = skipped.map((m) => displayName(m)).join(", ");
 
   return (
     <>
@@ -40,9 +42,15 @@ export default async function BillPage({ params }: { params: Promise<{ id: strin
         </p>
       ) : null}
 
+      {skipped.length > 0 && !amountIsZero ? (
+        <p role="status" className="mb-4 rounded-md bg-warning-soft px-3 py-2 text-sm text-warning" data-testid="bill-skipped">
+          Skipped ({skipped.length}, amount is $0 so no charge is created): {skippedNames}.
+        </p>
+      ) : null}
+
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Amount" value={formatCents(period.amountCents)} hint={period.newMemberAmountCents != null ? `New members ${formatCents(period.newMemberAmountCents)}` : "Same for new members"} />
-        <Stat label="To bill" value={toBill.length} hint={`${alreadyBilled.length} already billed`} />
+        <Stat label="To bill" value={toBill.length} hint={`${alreadyBilled.length} already billed${skipped.length > 0 ? `, ${skipped.length} skipped` : ""}`} />
         <Stat label="Total" value={formatCents(totalCents)} />
         <Stat label="Due" value={formatDate(period.dueDate)} />
       </div>
@@ -56,7 +64,9 @@ export default async function BillPage({ params }: { params: Promise<{ id: strin
             {canBill
               ? `This creates ${toBill.length} charges totalling ${formatCents(totalCents)}. Brothers see them on their Dues page right away.`
               : toBill.length === 0
-                ? "Everyone is already billed for this period. Nothing to do."
+                ? skipped.length > 0
+                  ? "Nobody to bill: everyone else is already billed. Nothing to do."
+                  : "Everyone is already billed for this period. Nothing to do."
                 : "Set the amount first."}
           </p>
           <RunForm action={billPeriod} periodId={period.id} label={canBill ? `Bill ${toBill.length} brothers ${formatCents(totalCents)}` : "Nothing to bill"} pendingText="Billing…" disabled={!canBill} cancelHref="/dues/periods" />
@@ -64,7 +74,7 @@ export default async function BillPage({ params }: { params: Promise<{ id: strin
       </Card>
 
       {toBill.length === 0 ? (
-        <EmptyState title="Nobody to bill" description="Every current brother already has a dues charge for this period." />
+        <EmptyState title="Nobody to bill" description={skipped.length > 0 ? "Every other current brother already has a dues charge for this period." : "Every current brother already has a dues charge for this period."} />
       ) : (
         <Card>
           <Table>

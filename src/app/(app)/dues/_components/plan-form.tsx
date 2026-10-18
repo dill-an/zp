@@ -18,7 +18,10 @@ export function PlanForm({ memberId, scopes, onDone }: { memberId: number; scope
   const [result, action] = useActionState(createPaymentPlan, null);
   useCloseOnSuccess(result, onDone);
   const owing = scopes.filter((s) => s.balanceCents > 0);
-  const [scopeKey, setScopeKey] = useState<string>(fieldValue(result, "periodId", owing[0]?.periodId ?? ""));
+  // The select stays uncontrolled: the form reset after a failed action would wipe a controlled value. Keying it on the
+  // last submitted scope remounts it with that scope as the default, which the reset then keeps.
+  const scopeDefault = fieldValue(result, "periodId", owing[0]?.periodId ?? "");
+  const [scopeKey, setScopeKey] = useState<string>(scopeDefault);
   const selected = scopes.find((s) => String(s.periodId ?? "") === scopeKey) ?? owing[0];
   if (owing.length === 0) {
     return <p className="text-sm text-muted">This brother has nothing outstanding, so there is nothing to put on a plan.</p>;
@@ -27,7 +30,7 @@ export function PlanForm({ memberId, scopes, onDone }: { memberId: number; scope
     <form action={action} className="space-y-3">
       <input type="hidden" name="memberId" value={memberId} />
       <Field label="Period" htmlFor="plan-period" hint={selected ? `Installments must add up to ${formatCents(selected.balanceCents)}.` : undefined}>
-        <Select id="plan-period" name="periodId" value={scopeKey} onChange={(e) => setScopeKey(e.target.value)}>
+        <Select key={`scope-${scopeDefault}`} id="plan-period" name="periodId" defaultValue={scopeDefault} onChange={(e) => setScopeKey(e.target.value)}>
           {owing.map((s) => (
             <option key={s.periodId ?? "none"} value={s.periodId ?? ""}>
               {s.name} ({formatCents(s.balanceCents)} owed)

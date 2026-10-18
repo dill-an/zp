@@ -40,6 +40,11 @@ export type TaskFormProps = {
 export function TaskForm({ action, chairs, memberGroups, currentUserId, defaults = {}, submitLabel, cancelHref, mode }: TaskFormProps) {
   const [result, formAction] = useActionState(action, null);
   const [selected, setSelected] = useState<Set<number>>(() => new Set(defaults.assigneeIds ?? []));
+  // React 19 resets the form's DOM after the action returns (also when it failed). A controlled `checked`
+  // is wiped by that reset while `selected` still lists the names, and the next submit would then send no
+  // assignees. So the boxes are uncontrolled: `defaultChecked` follows `selected`, which the reset restores.
+  // Changing the selection from outside the boxes ("Assign to me", "Clear") remounts them through this key.
+  const [listKey, setListKey] = useState(0);
   const errors = result && !result.ok ? result.fieldErrors ?? {} : {};
   const toggle = (id: number, on: boolean) =>
     setSelected((prev) => {
@@ -48,6 +53,16 @@ export function TaskForm({ action, chairs, memberGroups, currentUserId, defaults
       else next.delete(id);
       return next;
     });
+  const replace = (next: Set<number>) => {
+    setSelected(next);
+    setListKey((k) => k + 1);
+  };
+  const toggleMe = () => {
+    const next = new Set(selected);
+    if (next.has(currentUserId)) next.delete(currentUserId);
+    else next.add(currentUserId);
+    replace(next);
+  };
   const selectedNames = memberGroups
     .flatMap((g) => g.members)
     .filter((m) => selected.has(m.id))
@@ -117,11 +132,11 @@ export function TaskForm({ action, chairs, memberGroups, currentUserId, defaults
               <span className="ml-1.5 text-xs font-normal text-muted">{selected.size === 0 ? "nobody yet" : `${selected.size} selected`}</span>
             </p>
             <div className="flex gap-3 text-xs">
-              <button type="button" className="text-primary hover:underline" onClick={() => toggle(currentUserId, !selected.has(currentUserId))}>
+              <button type="button" className="text-primary hover:underline" onClick={toggleMe}>
                 {selected.has(currentUserId) ? "Remove me" : "Assign to me"}
               </button>
               {selected.size > 0 ? (
-                <button type="button" className="text-muted hover:underline" onClick={() => setSelected(new Set())}>
+                <button type="button" className="text-muted hover:underline" onClick={() => replace(new Set())}>
                   Clear
                 </button>
               ) : null}
@@ -131,14 +146,14 @@ export function TaskForm({ action, chairs, memberGroups, currentUserId, defaults
           {errors.assigneeIds ? <p className="text-xs text-danger">{errors.assigneeIds[0]}</p> : null}
           <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-border p-3" data-testid="assignee-list">
             {memberGroups.map((g) => (
-              <fieldset key={g.label}>
+              <fieldset key={`${g.label}:${listKey}`}>
                 <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{g.label}</legend>
                 <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
                   {g.members.map((m) => {
                     const id = `assignee-${m.id}`;
                     return (
                       <label key={m.id} htmlFor={id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-surface-2">
-                        <Checkbox id={id} name="assigneeIds[]" value={m.id} checked={selected.has(m.id)} onChange={(e) => toggle(m.id, e.currentTarget.checked)} />
+                        <Checkbox id={id} name="assigneeIds[]" value={m.id} defaultChecked={selected.has(m.id)} onChange={(e) => toggle(m.id, e.currentTarget.checked)} />
                         <span className="truncate">
                           {displayName(m)}
                           {m.id === currentUserId ? <span className="text-muted"> (you)</span> : null}

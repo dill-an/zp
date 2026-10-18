@@ -18,7 +18,7 @@ import {
   members,
   sanctions,
 } from "@/db/schema";
-import { fail, ok, parseForm, runAction, type ActionResult } from "@/lib/action-result";
+import { fail, formValues, ok, parseForm, runAction, type ActionResult } from "@/lib/action-result";
 import { requirePermissionForAction, requireUserForAction } from "@/lib/auth";
 import { can, type CurrentUser } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
@@ -95,6 +95,7 @@ const createWeekSchema = z.object({
 /** Create a labor week: empty, copied from the most recent earlier week, or auto-filled. */
 export async function createWeek(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   let target: string | null = null;
+  let skippedNote = "";
   const result = await runAction(async () => {
     const user = await requirePermissionForAction("labor.manage");
     const parsed = parseForm(createWeekSchema, formData);
@@ -110,11 +111,21 @@ export async function createWeek(_prev: ActionResult | null, formData: FormData)
         return fail("There is no earlier week to copy from.");
       }
       const activeIds = new Set(listJobTypes().map((jt) => jt.id));
-      const activeMembers = new Set(getLaborPool().map((m) => m.id));
+      // Brothers who left the house are not copied; everyone else keeps their job (the same rule manual
+      // assigning uses). Whatever is left out is written into the week notes so the open slot is explained.
+      const skipped: string[] = [];
       for (const a of getWeekAssignments(prev.id)) {
-        if (!activeIds.has(a.jobTypeId) || !activeMembers.has(a.memberId)) continue;
+        if (!activeIds.has(a.jobTypeId)) continue;
+        if (a.member.status === "inactive" || a.member.status === "alumni") {
+          skipped.push(`${displayName(a.member)} (${a.jobType.name})`);
+          continue;
+        }
         db.insert(jobAssignments).values({ weekId: week.id, jobTypeId: a.jobTypeId, memberId: a.memberId, slot: a.slot, status: "assigned" }).run();
         created += 1;
+      }
+      if (skipped.length) {
+        skippedNote = `Not copied from the week of ${formatDate(prev.weekStart)} (no longer active): ${skipped.join(", ")}.`;
+        db.update(laborWeeks).set({ notes: skippedNote }).where(eq(laborWeeks.id, week.id)).run();
       }
     } else if (mode === "autofill") {
       created = fillWeek(week.id, weekStart);
@@ -124,11 +135,11 @@ export async function createWeek(_prev: ActionResult | null, formData: FormData)
       action: "labor.week.create",
       entityType: "labor_week",
       entityId: week.id,
-      summary: `${user.username} created the labor week of ${weekStart} (${mode}, ${created} assignments)`,
+      summary: `${user.username} created the labor week of ${weekStart} (${mode}, ${created} assignments)${skippedNote ? `; ${skippedNote}` : ""}`,
     });
     revalidateLabor();
     if (mode === "empty") target = `/labor/week/${weekStart}?manage=1`;
-    return ok(mode === "copy" ? `Week created with ${created} assignments copied.` : mode === "autofill" ? `Week created and ${created} slots filled.` : "Week created.");
+    return ok(mode === "copy" ? `Week created with ${created} assignments copied.${skippedNote ? ` ${skippedNote}` : ""}` : mode === "autofill" ? `Week created and ${created} slots filled.` : "Week created.");
   });
   if (target) redirect(target);
   return result;
@@ -249,6 +260,8 @@ export async function saveRowAssignments(_prev: ActionResult | null, formData: F
     const week = getWeekById(parsed.data.weekId);
     const jobType = getJobType(parsed.data.jobTypeId);
     if (!week || !jobType) return fail("Not found.");
+    // Failures echo the submitted picks so the row keeps what the manager chose (React resets the form).
+    const reject = (message: string) => fail(message, undefined, formValues(formData));
     const existing = getWeekAssignments(week.id).filter((a) => a.jobTypeId === jobType.id);
     const slotCount = Math.max(jobType.slots, ...existing.map((a) => a.slot), 1);
     const wanted: { slot: number; memberId: number | null }[] = [];
@@ -262,17 +275,17 @@ export async function saveRowAssignments(_prev: ActionResult | null, formData: F
         continue;
       }
       const memberId = Number(value);
-      if (!Number.isInteger(memberId) || memberId <= 0) return fail(`Slot ${s}: pick a brother from the list.`);
+      if (!Number.isInteger(memberId) || memberId <= 0) return reject(`Slot ${s}: pick a brother from the list.`);
       wanted.push({ slot: s, memberId });
     }
     const chosen = wanted.map((w) => w.memberId).filter((id): id is number => id != null);
-    if (new Set(chosen).size !== chosen.length) return fail("The same brother cannot take two slots of one job.");
+    if (new Set(chosen).size !== chosen.length) return reject("The same brother cannot take two slots of one job.");
     if (chosen.length) {
       const found = db.select({ id: members.id, status: members.status }).from(members).where(inArray(members.id, chosen)).all();
       for (const id of chosen) {
         const m = found.find((f) => f.id === id);
-        if (!m) return fail("Not found.");
-        if (m.status === "inactive" || m.status === "alumni") return fail("That brother is no longer active.");
+        if (!m) return reject("Not found.");
+        if (m.status === "inactive" || m.status === "alumni") return reject("That brother is no longer active.");
       }
     }
     const changes: string[] = [];
@@ -280,7 +293,7 @@ export async function saveRowAssignments(_prev: ActionResult | null, formData: F
       const current = existing.find((a) => a.slot === w.slot) ?? null;
       if (current?.memberId === w.memberId) continue;
       if (current && (current.status !== "assigned" || current.completedAt || current.verifiedAt)) {
-        return fail(`Slot ${w.slot} (${displayName(current.member)}) is already ${current.status}; reset it on the Verify page before changing it.`);
+        return reject(`Slot ${w.slot} (${displayName(current.member)}) is already ${current.status}; reset it on the Verify page before changing it.`);
       }
       if (w.memberId == null) {
         if (current) {
@@ -616,8 +629,12 @@ export async function approveSwap(_prev: ActionResult | null, formData: FormData
     const loaded = loadSwap(formData);
     if ("result" in loaded) return loaded.result;
     const { row, a } = loaded;
-    if (row.status !== "pending" && row.status !== "accepted") return fail("This request is already closed.");
+    if (row.status === "approved" || row.status === "declined" || row.status === "cancelled") return fail("This request is already closed.");
     if (row.targetMemberId == null) return fail("No brother has claimed this open request yet.");
+    if (row.status !== "accepted") return fail("The brother asked has not accepted this swap yet.");
+    // The job may have been handed to someone else since the request was made (manual reassignment,
+    // another swap); never move a job out from under a brother who did not ask for it.
+    if (row.requestedById !== a.memberId) return fail(`${displayName(a.member)} now holds this job, not the brother who asked for the swap; decline this request.`);
     if (a.status !== "assigned") return fail("That job is no longer open.");
     const target = db.select({ id: members.id, firstName: members.firstName, lastName: members.lastName, preferredName: members.preferredName, status: members.status }).from(members).where(eq(members.id, row.targetMemberId)).get();
     if (!target || target.status === "inactive" || target.status === "alumni") return fail("The brother taking the job is no longer active.");
@@ -670,6 +687,11 @@ export async function reviewExcuse(_prev: ActionResult | null, formData: FormDat
     const a = getAssignment(row.assignmentId);
     if (!a) return fail("Not found.");
     const approve = parsed.data.decision === "approve";
+    // An excuse only ever applies to the brother who asked. If the job moved to someone else since
+    // (an approved swap, a manual reassignment), approving would excuse the new assignee instead.
+    if (approve && row.memberId !== a.memberId) {
+      return fail(`${displayName(a.member)} now holds this job; this excuse request no longer applies. Deny it instead.`);
+    }
     db.update(excuseRequests)
       .set({ status: approve ? "approved" : "denied", reviewedById: user.id, reviewedAt: nowISO(), reviewNote: parsed.data.note ?? null })
       .where(eq(excuseRequests.id, row.id))
@@ -713,7 +735,7 @@ export async function saveJobType(_prev: ActionResult | null, formData: FormData
     const parsed = parseForm(jobTypeSchema, formData);
     if ("result" in parsed) return parsed.result;
     const d = parsed.data;
-    if (d.dueOffsetDays < d.startOffsetDays) return fail("The due day cannot be before the start day.", { dueOffsetDays: ["Must be on or after the start day."] });
+    if (d.dueOffsetDays < d.startOffsetDays) return fail("The due day cannot be before the start day.", { dueOffsetDays: ["Must be on or after the start day."] }, formValues(formData));
     const values = {
       name: d.name,
       kind: d.kind,

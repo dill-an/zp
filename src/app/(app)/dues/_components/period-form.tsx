@@ -47,7 +47,13 @@ export function PeriodForm({ period, onDone }: { period?: PeriodFormValues; onDo
         </Field>
       </FormRow>
       <FormRow>
-        <Field label="Due date" htmlFor={`${prefix}-dueDate`} required error={errors?.dueDate}>
+        <Field
+          label="Due date"
+          htmlFor={`${prefix}-dueDate`}
+          required
+          hint={period ? "Changing it also moves the due date of dues charges already billed for this period." : undefined}
+          error={errors?.dueDate}
+        >
           <Input id={`${prefix}-dueDate`} name="dueDate" type="date" required defaultValue={fieldValue(result, "dueDate", period?.dueDate)} />
         </Field>
         <Field label="Late fee ($)" htmlFor={`${prefix}-lateFee`} hint="Charged to anyone still owing after the due date" error={errors?.lateFee}>

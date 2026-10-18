@@ -225,7 +225,7 @@ export function TreasurerDashboard({
               </div>
               <ul className="space-y-2 md:hidden">
                 {filtered.map((r) => (
-                  <MobileRow key={r.member.id} row={r} />
+                  <MobileRow key={r.member.id} row={r} periods={periodOptions} defaultPeriodId={selected?.id ?? active?.id ?? null} defaultDueDate={selected?.dueDate ?? null} today={today} />
                 ))}
               </ul>
             </>
@@ -236,7 +236,19 @@ export function TreasurerDashboard({
   );
 }
 
-function MobileRow({ row: r }: { row: BalanceRow }) {
+function MobileRow({
+  row: r,
+  periods,
+  defaultPeriodId,
+  defaultDueDate,
+  today,
+}: {
+  row: BalanceRow;
+  periods: { id: number; name: string }[];
+  defaultPeriodId: number | null;
+  defaultDueDate: string | null;
+  today: string;
+}) {
   return (
     <li>
       <Card className="px-4 py-3" data-testid={`member-card-${r.member.id}`}>
@@ -251,13 +263,34 @@ function MobileRow({ row: r }: { row: BalanceRow }) {
           </span>
           <Balance cents={r.balanceCents} />
         </div>
-        <div className="mt-2 flex items-center justify-between text-xs text-muted">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
           <span>
             {formatCents(r.paidCents)} of {formatCents(r.chargedCents)} paid
           </span>
-          <ButtonLink href={`/dues/members/${r.member.id}`} size="sm" variant="outline">
-            Ledger
-          </ButtonLink>
+          <div className="flex gap-1">
+            <PaymentDialog
+              memberId={r.member.id}
+              memberName={displayName(r.member)}
+              periods={periods}
+              defaultPeriodId={defaultPeriodId}
+              today={today}
+              trigger="Pay"
+              triggerVariant="outline"
+              triggerSize="sm"
+            />
+            <ChargeDialog
+              memberId={r.member.id}
+              memberName={displayName(r.member)}
+              periods={periods}
+              defaultPeriodId={defaultPeriodId}
+              defaultDueDate={defaultDueDate}
+              trigger="Charge"
+              triggerSize="sm"
+            />
+            <ButtonLink href={`/dues/members/${r.member.id}`} size="sm" variant="ghost">
+              Ledger
+            </ButtonLink>
+          </div>
         </div>
       </Card>
     </li>

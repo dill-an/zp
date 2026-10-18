@@ -38,10 +38,13 @@ function MissedForm({ assignmentId, memberName, jobName, fineCents, close }: { a
   );
 }
 
-/** "Mark missed" button with a confirm step and the sanction checkbox. */
-export function MarkMissedDialog({ assignmentId, memberName, jobName, fineCents }: { assignmentId: number; memberName: string; jobName: string; fineCents: number }) {
+/**
+ * "Mark missed" button with a confirm step and the sanction checkbox. `hidden` hides the trigger once the
+ * job is missed while keeping the dialog mounted, so its confirmation stays visible until it closes itself.
+ */
+export function MarkMissedDialog({ assignmentId, memberName, jobName, fineCents, hidden = false }: { assignmentId: number; memberName: string; jobName: string; fineCents: number; hidden?: boolean }) {
   return (
-    <Dialog trigger="Mark missed" triggerVariant="outline" triggerSize="sm" title="Mark missed">
+    <Dialog trigger="Mark missed" triggerVariant="outline" triggerSize="sm" triggerClassName={hidden ? "hidden" : undefined} title="Mark missed">
       {(close) => <MissedForm assignmentId={assignmentId} memberName={memberName} jobName={jobName} fineCents={fineCents} close={close} />}
     </Dialog>
   );

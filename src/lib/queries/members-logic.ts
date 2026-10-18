@@ -318,6 +318,14 @@ export function roleAfterTermEnd(role: Role, remainingActiveTerms: number): Role
   return role;
 }
 
+/**
+ * May someone with members.manage reset this member's password or change their status?
+ * Only an admin may act on another admin; otherwise a secretary could lock out or take over an admin account.
+ */
+export function canManageMemberAccount(actorRole: Role, targetRole: Role): boolean {
+  return targetRole !== "admin" || actorRole === "admin";
+}
+
 /* ------------------------------------------------------------------ */
 /* Chair grouping                                                      */
 /* ------------------------------------------------------------------ */

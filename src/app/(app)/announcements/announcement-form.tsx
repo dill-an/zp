@@ -33,6 +33,8 @@ export function AnnouncementForm({
 }) {
   const [result, formAction] = useActionState(action, null);
   const errors = result && !result.ok ? (result.fieldErrors ?? {}) : {};
+  // The select is re-keyed by the submitted value: React applies defaultValue only on mount and resets the form after the action.
+  const audience = fieldValue(result, "audience", initial?.audience ?? "all");
   return (
     <form action={formAction} className="space-y-4">
       <Field label="Title" htmlFor="title" required error={errors.title}>
@@ -43,7 +45,7 @@ export function AnnouncementForm({
       </Field>
       <FormRow>
         <Field label="Audience" htmlFor="audience" required error={errors.audience}>
-          <Select id="audience" name="audience" defaultValue={fieldValue(result, "audience", initial?.audience ?? "all")}>
+          <Select key={audience} id="audience" name="audience" defaultValue={audience}>
             {audiences.map((a) => (
               <option key={a.value} value={a.value}>
                 {a.label}

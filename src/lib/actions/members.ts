@@ -2,10 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { LABOR_GROUPS, MEMBER_ROLES, MEMBER_STATUSES, members, pledgeClasses, type Member } from "@/db/schema";
+import { LABOR_GROUPS, MEMBER_ROLES, MEMBER_STATUSES, chairHolders, chairs, members, pledgeClasses, type Member } from "@/db/schema";
 import { fail, ok, parseForm, runAction, type ActionResult } from "@/lib/action-result";
 import { requirePermissionForAction, requireUserForAction } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
@@ -13,9 +13,10 @@ import { can } from "@/lib/permissions";
 import { hashPassword, validatePasswordStrength } from "@/lib/password";
 import { destroyAllSessionsFor } from "@/lib/session";
 import { displayName } from "@/lib/names";
+import { todayISO } from "@/lib/dates";
 import { resetMemberPassword } from "@/lib/actions/auth";
-import { getPledgeClass, listUsernames, usernameTaken } from "@/lib/queries/members";
-import { isValidUsername, normalizeUsername, suggestUsername } from "@/lib/queries/members-logic";
+import { countActiveTerms, getPledgeClass, listUsernames, usernameTaken } from "@/lib/queries/members";
+import { canManageMemberAccount, isValidUsername, normalizeUsername, roleAfterTermEnd, suggestUsername } from "@/lib/queries/members-logic";
 
 /* ------------------------------------------------------------------ */
 /* Schemas                                                             */
@@ -88,6 +89,43 @@ function resolvePledgeClass(id: number | undefined): { ok: true; id: number | nu
 /** Which top-level fields changed, for the audit summary. */
 function changedKeys(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
   return Object.keys(after).filter((k) => (before[k] ?? null) !== (after[k] ?? null));
+}
+
+/**
+ * A member who goes inactive or alumni stops holding chairs: end their open terms today and, when that was
+ * their last term, drop officer back to member (admins are never touched). Returns the chair names ended.
+ */
+function endOpenChairTerms(actor: { id: number; username: string }, member: Pick<Member, "id" | "firstName" | "lastName" | "preferredName">, status: string): string[] {
+  const open = db
+    .select({ holder: chairHolders, chair: { name: chairs.name, slug: chairs.slug } })
+    .from(chairHolders)
+    .innerJoin(chairs, eq(chairs.id, chairHolders.chairId))
+    .where(and(eq(chairHolders.memberId, member.id), isNull(chairHolders.termEnd)))
+    .all();
+  if (open.length === 0) return [];
+  const today = todayISO();
+  const who = displayName(member);
+  for (const { holder, chair } of open) {
+    const termEnd = today < holder.termStart ? holder.termStart : today;
+    db.update(chairHolders).set({ termEnd }).where(eq(chairHolders.id, holder.id)).run();
+    logAudit({
+      actorId: actor.id,
+      action: "chair_holder.end",
+      entityType: "chair_holder",
+      entityId: holder.id,
+      summary: `${actor.username} ended ${who}'s term as ${chair.name} on ${termEnd} (member now ${status})`,
+    });
+    revalidatePath(`/chairs/${chair.slug}`);
+  }
+  const current = db.select({ role: members.role }).from(members).where(eq(members.id, member.id)).get();
+  if (current) {
+    const next = roleAfterTermEnd(current.role, countActiveTerms(member.id));
+    if (next !== current.role) {
+      db.update(members).set({ role: next, updatedAt: new Date().toISOString() }).where(eq(members.id, member.id)).run();
+      logAudit({ actorId: actor.id, action: "member.role", entityType: "member", entityId: member.id, summary: `${actor.username}: ${who} is no longer an officer (chair terms ended, now ${status})` });
+    }
+  }
+  return open.map((o) => o.chair.name);
 }
 
 /* ------------------------------------------------------------------ */
@@ -229,6 +267,10 @@ export async function updateMember(_prev: ActionResult | null, formData: FormDat
     if (isSelf && d.status !== existing.status && (d.status === "inactive" || d.status === "alumni")) {
       return fail("You cannot deactivate your own account.", { status: ["Ask another admin."] }, valuesOf(formData));
     }
+    // Only admins may change another admin's status (a status change can lock them out).
+    if (d.status !== existing.status && !canManageMemberAccount(actor.role, existing.role)) {
+      return fail("Only an admin can change another admin's status.", { status: ["Only admins can change this."] }, valuesOf(formData));
+    }
 
     const next = {
       firstName: d.firstName,
@@ -261,7 +303,10 @@ export async function updateMember(_prev: ActionResult | null, formData: FormDat
     }
     if (d.status !== existing.status) {
       logAudit({ actorId: actor.id, action: "member.status", entityType: "member", entityId: memberId, summary: `${actor.username} changed ${who}'s status from ${existing.status} to ${d.status}` });
-      if (d.status === "inactive" || d.status === "alumni") destroyAllSessionsFor(memberId);
+      if (d.status === "inactive" || d.status === "alumni") {
+        destroyAllSessionsFor(memberId);
+        endOpenChairTerms(actor, existing, d.status);
+      }
     }
     revalidatePath("/members");
     revalidatePath(`/members/${memberId}`);
@@ -279,10 +324,15 @@ export async function setMemberStatus(memberId: number, status: "active" | "inac
     const actor = await requirePermissionForAction("members.manage");
     const existing = db.select().from(members).where(eq(members.id, memberId)).get();
     if (!existing) return fail("Not found.");
+    if (!canManageMemberAccount(actor.role, existing.role)) return fail("Only an admin can change another admin's status.");
     if (existing.id === actor.id && status === "inactive") return fail("You cannot deactivate your own account.");
     if (existing.status === status) return ok(status === "active" ? "Already active." : "Already inactive.");
     db.update(members).set({ status, updatedAt: new Date().toISOString() }).where(eq(members.id, memberId)).run();
-    if (status === "inactive") destroyAllSessionsFor(memberId);
+    const ended: string[] = [];
+    if (status === "inactive") {
+      destroyAllSessionsFor(memberId);
+      ended.push(...endOpenChairTerms(actor, existing, status));
+    }
     logAudit({
       actorId: actor.id,
       action: "member.status",
@@ -293,7 +343,7 @@ export async function setMemberStatus(memberId: number, status: "active" | "inac
     revalidatePath("/members");
     revalidatePath(`/members/${memberId}`);
     revalidatePath("/chairs");
-    return ok(status === "active" ? "Member reactivated." : "Member deactivated.");
+    return ok(status === "active" ? "Member reactivated." : ended.length ? `Member deactivated. Ended their term as ${ended.join(" and ")}.` : "Member deactivated.");
   });
 }
 
@@ -316,12 +366,14 @@ const resetSchema = z.object({
 
 export async function resetPasswordAction(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   return runAction(async () => {
-    await requirePermissionForAction("members.manage");
+    const actor = await requirePermissionForAction("members.manage");
     const parsed = parseForm(resetSchema, formData);
     if ("result" in parsed) return parsed.result;
     const { memberId, temporaryPassword } = parsed.data;
-    const existing = db.select({ id: members.id }).from(members).where(eq(members.id, memberId)).get();
+    const existing = db.select({ id: members.id, role: members.role }).from(members).where(eq(members.id, memberId)).get();
     if (!existing) return fail("Not found.");
+    // Only admins may reset another admin's password (otherwise any members.manage holder could take over an admin account).
+    if (!canManageMemberAccount(actor.role, existing.role)) return fail("Only an admin can reset another admin's password.");
     const result = await resetMemberPassword(memberId, temporaryPassword);
     if (result.ok) revalidatePath(`/members/${memberId}`);
     return result;

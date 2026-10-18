@@ -364,6 +364,8 @@ export type BillPreview = {
   period: DuesPeriod;
   toBill: { member: MemberWithClass; amountCents: number }[];
   alreadyBilled: MemberWithClass[];
+  /** Unbilled members whose computed amount is $0 (for example new members when the new member amount is 0); no charge is created for them. */
+  skipped: MemberWithClass[];
   totalCents: number;
 };
 
@@ -380,13 +382,15 @@ export function getBillPreview(periodId: number): BillPreview | null {
       .all()
       .map((r) => r.memberId),
   );
-  const toBill = current
+  const unbilled = current
     .filter((m) => !billedIds.has(m.id))
     .map((member) => ({ member, amountCents: member.status === "new_member" && period.newMemberAmountCents != null ? period.newMemberAmountCents : period.amountCents }));
+  const toBill = unbilled.filter((r) => r.amountCents > 0);
   return {
     period,
     toBill,
     alreadyBilled: current.filter((m) => billedIds.has(m.id)),
+    skipped: unbilled.filter((r) => r.amountCents <= 0).map((r) => r.member),
     totalCents: toBill.reduce((t, r) => t + r.amountCents, 0),
   };
 }
@@ -395,11 +399,17 @@ export type LateFeePreview = {
   period: DuesPeriod;
   toCharge: { member: MemberWithClass; balanceCents: number }[];
   alreadyCharged: MemberWithClass[];
+  /** Members who still owe money but are not overdue (an approved payment plan whose next installment is not due yet, or only later-dated charges); no fee is charged. */
+  notYetDue: { member: MemberWithClass; balanceCents: number; nextDueDate: string | null }[];
   totalCents: number;
   isPastDue: boolean;
 };
 
-/** Current members with a positive balance for the period after its due date and no late fee yet. */
+/**
+ * Current members who are overdue for the period (positive balance whose next due date, the next approved-plan installment
+ * when there is one, has passed) and have no late fee yet. Uses the same status as the dashboard, so a brother on a plan
+ * whose next installment is still ahead is listed as not yet due instead of being charged.
+ */
 export function getLateFeePreview(periodId: number): LateFeePreview | null {
   const period = getPeriod(periodId);
   if (!period) return null;
@@ -413,11 +423,15 @@ export function getLateFeePreview(periodId: number): LateFeePreview | null {
       .map((r) => r.memberId),
   );
   const owing = getBalances(periodId).filter((r) => r.balanceCents > 0);
-  const toCharge = owing.filter((r) => !feedIds.has(r.member.id)).map((r) => ({ member: r.member, balanceCents: r.balanceCents }));
+  const overdue = owing.filter((r) => r.status === "overdue");
+  const toCharge = overdue.filter((r) => !feedIds.has(r.member.id)).map((r) => ({ member: r.member, balanceCents: r.balanceCents }));
   return {
     period,
     toCharge,
     alreadyCharged: owing.filter((r) => feedIds.has(r.member.id)).map((r) => r.member),
+    notYetDue: owing
+      .filter((r) => r.status !== "overdue" && !feedIds.has(r.member.id))
+      .map((r) => ({ member: r.member, balanceCents: r.balanceCents, nextDueDate: r.nextDueDate })),
     totalCents: toCharge.length * period.lateFeeCents,
     isPastDue: today > period.dueDate,
   };

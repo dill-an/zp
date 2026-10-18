@@ -12,10 +12,12 @@ type M = { id: number; firstName: string; lastName: string; preferredName: strin
 export function AssignForm({ requestId, groups, current, compact = false }: { requestId: number; groups: { label: string; members: M[] }[]; current: number | null; compact?: boolean }) {
   const [result, action] = useActionState(assignMaintenance.bind(null, requestId), null);
   const id = `assign-${requestId}`;
+  // Re-keyed by its value: React applies a select's defaultValue only on mount and resets the form after the action.
+  const assignedToId = fieldValue(result, "assignedToId", current == null ? "" : String(current));
   return (
     <form action={action} className={compact ? "flex flex-wrap items-end gap-2" : "space-y-3"}>
       <Field label="Assign to" htmlFor={id} className={compact ? "min-w-48 flex-1" : undefined}>
-        <MemberSelect id={id} name="assignedToId" groups={groups} placeholder="Nobody" defaultValue={fieldValue(result, "assignedToId", current == null ? "" : String(current))} />
+        <MemberSelect key={`assignee-${assignedToId}`} id={id} name="assignedToId" groups={groups} placeholder="Nobody" defaultValue={assignedToId} />
       </Field>
       <SubmitButton size={compact ? "md" : "sm"} variant="outline" pendingText="Saving…">
         Assign
@@ -42,10 +44,12 @@ export function StatusForm({
 }) {
   const [result, action] = useActionState(changeMaintenanceStatus.bind(null, requestId), null);
   const id = `status-${requestId}`;
+  // Re-keyed by its value: React applies a select's defaultValue only on mount and resets the form after the action.
+  const status = fieldValue(result, "status", current);
   return (
     <form action={action} className={compact ? "flex flex-wrap items-end gap-2" : "space-y-3"}>
       <Field label="Status" htmlFor={id} className={compact ? "min-w-40 flex-1" : undefined}>
-        <Select id={id} name="status" defaultValue={fieldValue(result, "status", current)}>
+        <Select key={status} id={id} name="status" defaultValue={status}>
           {statuses.map((s) => (
             <option key={s} value={s}>
               {humanize(s)}

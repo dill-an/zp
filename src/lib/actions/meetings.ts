@@ -17,14 +17,14 @@ import {
   sanctions,
   type AttendanceStatus,
 } from "@/db/schema";
-import { fail, ok, parseForm, runAction, type ActionResult } from "@/lib/action-result";
+import { fail, formValues, ok, parseForm, runAction, type ActionResult } from "@/lib/action-result";
 import { requirePermissionForAction, requireUserForAction } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { addDaysISO, dateAtLocalTime, formatDate, localInputToISO, nowISO, todayISO } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { displayName } from "@/lib/names";
 import { getFinePreview, getSanctionPreview } from "@/lib/queries/meetings";
-import { meetingDateOnly, weeklySeries } from "@/lib/queries/meetings-logic";
+import { fineDescription, meetingDateOnly, weeklySeries } from "@/lib/queries/meetings-logic";
 import { can } from "@/lib/permissions";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -82,10 +82,29 @@ export async function updateMeeting(id: number, _prev: ActionResult | null, form
     const { title, kind, location, agenda, isMandatory } = parsed.data;
     const scheduledAt = localInputToISO(parsed.data.scheduledAt);
     if (!scheduledAt) return fail("Pick a valid date and time.");
-    db.update(meetings)
-      .set({ title, kind, scheduledAt, location: location ?? null, agenda: agenda ?? null, isMandatory: isMandatory === "on" })
-      .where(eq(meetings.id, id))
-      .run();
+    const oldDescription = fineDescription(existing.title, existing.scheduledAt);
+    const newDescription = fineDescription(title, scheduledAt);
+    db.transaction((tx) => {
+      tx.update(meetings)
+        .set({ title, kind, scheduledAt, location: location ?? null, agenda: agenda ?? null, isMandatory: isMandatory === "on" })
+        .where(eq(meetings.id, id))
+        .run();
+      if (newDescription !== oldDescription) {
+        // Fine charges are matched by description, so the ones issued for this meeting follow its title and date
+        // (otherwise every fined absentee would be listed, and charged, again).
+        const onSheet = tx.select({ memberId: attendance.memberId }).from(attendance).where(eq(attendance.meetingId, id)).all().map((r) => r.memberId);
+        if (onSheet.length > 0) {
+          tx.update(charges)
+            .set({ description: newDescription })
+            .where(and(eq(charges.kind, "fine"), eq(charges.description, oldDescription), inArray(charges.memberId, onSheet)))
+            .run();
+        }
+        tx.update(sanctions)
+          .set({ reason: newDescription, updatedAt: nowISO() })
+          .where(and(eq(sanctions.source, "missed_meeting"), eq(sanctions.sourceRef, String(id)), eq(sanctions.reason, oldDescription)))
+          .run();
+      }
+    });
     logAudit({ actorId: user.id, action: "meeting.update", entityType: "meeting", entityId: id, summary: `${user.username} edited ${meetingLabel({ title, scheduledAt })}` });
     revalidateMeetings(id);
     redirect(`/meetings/${id}`);
@@ -122,9 +141,11 @@ export async function createMeetingSeries(_prev: ActionResult | null, formData: 
     const parsed = parseForm(seriesSchema, formData);
     if ("result" in parsed) return parsed.result;
     const { title, kind, weekday, time, firstDate, lastDate, location, isMandatory } = parsed.data;
-    if (lastDate < firstDate) return fail("The last date must be on or after the first date.", { lastDate: ["Must be on or after the first date."] });
+    if (lastDate < firstDate) {
+      return fail("The last date must be on or after the first date.", { lastDate: ["Must be on or after the first date."] }, formValues(formData));
+    }
     const dates = weeklySeries(firstDate, lastDate, weekday);
-    if (dates.length === 0) return fail("No dates fall on that weekday between the two dates.");
+    if (dates.length === 0) return fail("No dates fall on that weekday between the two dates.", { weekday: ["No dates in this range."] }, formValues(formData));
     const taken = new Set(
       db
         .select({ scheduledAt: meetings.scheduledAt })
@@ -366,7 +387,8 @@ export async function reviewExcuse(id: number, _prev: ActionResult | null, formD
       if (status === "approved" && meeting.attendanceTaken) {
         tx.insert(attendance)
           .values({ meetingId: meeting.id, memberId: row.memberId, status: "excused", note: "Excuse approved", recordedById: user.id, recordedAt: reviewedAt })
-          .onConflictDoUpdate({ target: [attendance.meetingId, attendance.memberId], set: { status: "excused", recordedById: user.id, recordedAt: reviewedAt } })
+          // Keep who took attendance and when: the review is in the audit log, and the note says why the status changed.
+          .onConflictDoUpdate({ target: [attendance.meetingId, attendance.memberId], set: { status: "excused", note: "Excuse approved" } })
           .run();
       }
     });

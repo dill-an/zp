@@ -35,6 +35,7 @@ import {
   nextOccurrenceDue,
   parseChecklistText,
   parseTags,
+  rejectedAssignees,
   serializeTags,
 } from "@/lib/queries/tasks-logic";
 
@@ -101,8 +102,11 @@ function logActivity(taskId: number, memberId: number | null, type: (typeof task
   db.insert(taskActivity).values({ taskId, memberId, type, body }).run();
 }
 
-/** Validate that every chosen assignee exists and may hold tasks. Returns the valid ids or an error message. */
-function validateAssignees(ids: number[]): { ids: number[] } | { error: string } {
+/**
+ * Validate that every chosen assignee exists and may hold tasks. Returns the valid ids or an error message.
+ * Ids in `keep` (already on the task) pass the status check, so an edit that leaves assignees alone still saves.
+ */
+function validateAssignees(ids: number[], keep: readonly number[] = []): { ids: number[] } | { error: string } {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return { ids: [] };
   const found = db
@@ -111,7 +115,7 @@ function validateAssignees(ids: number[]): { ids: number[] } | { error: string }
     .where(inArray(members.id, unique))
     .all();
   if (found.length !== unique.length) return { error: "One of the chosen brothers does not exist." };
-  if (found.some((m) => m.status === "inactive" || m.status === "alumni")) return { error: "Tasks can only be assigned to current brothers." };
+  if (rejectedAssignees(found, keep).length) return { error: "Tasks can only be assigned to current brothers." };
   return { ids: unique };
 }
 
@@ -242,12 +246,12 @@ export async function updateTask(taskId: number, _prev: ActionResult | null, for
       if (!chair || !chair.isActive) return fail("That chair does not exist.", undefined, formValues(formData));
       if (!canManageChair(user, chairId)) return fail("You can only move a task to a chair you hold.", undefined, formValues(formData));
     }
-    const assignees = validateAssignees(data.assigneeIds);
+    const before = assigneeIdsOf(taskId);
+    const assignees = validateAssignees(data.assigneeIds, before);
     if ("error" in assignees) return fail(assignees.error, undefined, formValues(formData));
     const dueAt = data.dueAt ? localInputToISO(data.dueAt) : null;
     const tags = serializeTags(parseTags(data.tags));
 
-    const before = assigneeIdsOf(taskId);
     const { added, removed } = diffAssignees(before, assignees.ids);
     db.update(tasks)
       .set({

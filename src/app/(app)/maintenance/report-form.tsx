@@ -24,6 +24,8 @@ export function MaintenanceForm({
   const [result, formAction] = useActionState(action, null);
   const errors = result && !result.ok ? (result.fieldErrors ?? {}) : {};
   const prefix = requestId == null ? "report" : "edit";
+  // The select is re-keyed by the submitted value: React applies defaultValue only on mount and resets the form after the action.
+  const priority = fieldValue(result, "priority", initial?.priority ?? "normal");
   return (
     <form action={formAction} className="space-y-4">
       <Field label="What is wrong?" htmlFor={`${prefix}-title`} required error={errors.title}>
@@ -34,7 +36,7 @@ export function MaintenanceForm({
           <Input id={`${prefix}-location`} name="location" maxLength={200} placeholder="e.g. 2nd floor bathroom" defaultValue={fieldValue(result, "location", initial?.location)} />
         </Field>
         <Field label="Priority" htmlFor={`${prefix}-priority`} required error={errors.priority}>
-          <Select id={`${prefix}-priority`} name="priority" defaultValue={fieldValue(result, "priority", initial?.priority ?? "normal")}>
+          <Select key={priority} id={`${prefix}-priority`} name="priority" defaultValue={priority}>
             {priorities.map((p) => (
               <option key={p} value={p}>
                 {humanize(p)}
