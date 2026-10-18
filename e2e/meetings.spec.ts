@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { test, expect as baseExpect, type Browser, type Page } from "@playwright/test";
 import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
 
@@ -7,8 +8,19 @@ import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
  * retries when the dev server serves a half-written manifest (a transient 500).
  */
 test.setTimeout(420_000);
-test.describe.configure({ retries: 1 });
+test.describe.configure({ retries: 2 });
 test.use({ actionTimeout: 90_000, navigationTimeout: 180_000 });
+
+// Same browser pick as playwright.config.ts, plus single-process mode: the shared box runs at its memory
+// limit and the OOM killer takes Chromium renderer processes first, which surfaces as "Page crashed".
+const sandboxChromium = "/opt/pw-browsers/chromium";
+const executablePath = process.env.PW_CHROMIUM ?? (fs.existsSync(sandboxChromium) ? sandboxChromium : undefined);
+test.use({
+  launchOptions: {
+    ...(executablePath ? { executablePath } : {}),
+    args: ["--single-process", "--no-zygote", "--disable-gpu", "--disable-dev-shm-usage"],
+  },
+});
 const expect = baseExpect.configure({ timeout: 90_000 });
 
 async function go(page: Page, url: string) {

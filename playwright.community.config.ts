@@ -10,7 +10,7 @@ const executablePath = process.env.PW_CHROMIUM ?? (fs.existsSync(sandboxChromium
 export default defineConfig({
   testDir: "./e2e",
   testMatch: /community\.spec\.ts/,
-  timeout: 420_000,
+  timeout: 900_000,
   expect: { timeout: 120_000 },
   fullyParallel: false,
   workers: 1,

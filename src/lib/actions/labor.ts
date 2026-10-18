@@ -254,6 +254,8 @@ export async function saveRowAssignments(_prev: ActionResult | null, formData: F
     const wanted: { slot: number; memberId: number | null }[] = [];
     for (let s = 1; s <= slotCount; s++) {
       const raw = formData.get(`slot_${s}`);
+      // Locked slots render a disabled select, which the browser leaves out of the form: leave them as they are.
+      if (raw === null) continue;
       const value = typeof raw === "string" ? raw.trim() : "";
       if (!value) {
         wanted.push({ slot: s, memberId: null });

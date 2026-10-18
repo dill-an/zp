@@ -1,11 +1,30 @@
-import { test, expect, type Browser, type Page } from "@playwright/test";
+import { test, expect, type Browser, type BrowserContext, type BrowserContextOptions } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { ADMIN, BROTHER, login, uniq } from "./helpers";
 
-/** A fresh browser context logged in as `user`, so two brothers can act in one test. */
-async function userPage(browser: Browser, user: { username: string; password: string }) {
-  const context = await browser.newContext();
+type Account = { username: string; password: string };
+type StorageState = Awaited<ReturnType<BrowserContext["storageState"]>>;
+
+/** Each account logs in once per run; later contexts reuse its session cookie. */
+const sessions = new Map<string, StorageState>();
+
+async function sessionFor(browser: Browser, user: Account): Promise<StorageState> {
+  let state = sessions.get(user.username);
+  if (!state) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await login(page, user);
+    state = await context.storageState();
+    sessions.set(user.username, state);
+    await context.close();
+  }
+  return state;
+}
+
+/** A browser context logged in as `user`, so two brothers can act in one test. */
+async function userPage(browser: Browser, user: Account, options: BrowserContextOptions = {}) {
+  const context = await browser.newContext({ ...options, storageState: await sessionFor(browser, user) });
   const page = await context.newPage();
-  await login(page, user);
   return { page, close: () => context.close() };
 }
 
@@ -255,9 +274,8 @@ test("mobile viewport renders events and the calendar day list", async ({ browse
   await createEvent(admin.page, title, { startsAt });
   await admin.close();
 
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const page = await context.newPage();
-  await login(page, BROTHER);
+  const mobile = await userPage(browser, BROTHER, { viewport: { width: 390, height: 844 } });
+  const { page } = mobile;
   await page.goto("/events");
   await expect(page.getByRole("heading", { level: 1, name: "Events" })).toBeVisible();
   await expect(page.locator("h3").filter({ hasText: title })).toBeVisible();
@@ -269,5 +287,5 @@ test("mobile viewport renders events and the calendar day list", async ({ browse
   await expect(dayList).toBeVisible();
   await expect(dayList.getByRole("link", { name: title })).toBeVisible();
   await expect(page.locator(`[data-date="${startsAt.slice(0, 10)}"]`)).toBeVisible();
-  await context.close();
+  await mobile.close();
 });
