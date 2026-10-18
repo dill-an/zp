@@ -67,10 +67,27 @@ export const STATUS_TONES: Record<string, Tone> = {
   not_going: "neutral",
 };
 
+/** Labels that read better than humanize() would produce. */
+export const STATUS_LABELS: Record<string, string> = {
+  todo: "To do",
+  not_going: "Not going",
+  wont_fix: "Won't fix",
+  new_member: "New member",
+  not_tracked: "Not tracked",
+  due_today: "Due today",
+  sober_monitor: "Sober monitor",
+  live_in: "Live-in",
+  late_fee: "Late fee",
+};
+
+export function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? humanize(status);
+}
+
 export function StatusPill({ status, label, className }: { status: string; label?: string; className?: string }) {
   return (
     <Badge tone={STATUS_TONES[status] ?? "neutral"} className={className}>
-      {label ?? humanize(status)}
+      {label ?? statusLabel(status)}
     </Badge>
   );
 }

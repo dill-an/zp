@@ -24,6 +24,16 @@ export function nowISO(): string {
   return new Date().toISOString();
 }
 
+/** Calendar date ("YYYY-MM-DD") of an ISO instant in the house timezone. */
+export function instantToDate(iso: string): string {
+  return todayISO(parseISO(iso));
+}
+
+/** Accepts either a calendar date or an ISO instant and returns the house-timezone calendar date. */
+export function toHouseDate(value: string): string {
+  return value.length === 10 ? value : instantToDate(value);
+}
+
 /** Parse "YYYY-MM-DD" into a Date at local midnight (safe for arithmetic on calendar days). */
 export function parseDateOnly(date: string): Date {
   const [y, m, d] = date.split("-").map(Number);
@@ -65,7 +75,8 @@ export function dayName(dow: number, short = false): string {
 /** "Oct 18" / "Oct 18, 2026" */
 export function formatDate(date: string | null | undefined, opts: { year?: boolean; weekday?: boolean } = {}): string {
   if (!date) return "";
-  const d = date.length === 10 ? parseDateOnly(date) : parseISO(date);
+  // Instants are converted to the house timezone first so a server in UTC shows the right day.
+  const d = parseDateOnly(toHouseDate(date));
   const parts: string[] = [];
   if (opts.weekday) parts.push(format(d, "EEE"));
   parts.push(format(d, opts.year ? "MMM d, yyyy" : "MMM d"));
@@ -168,7 +179,7 @@ export function isPast(iso: string | null | undefined, now: Date = new Date()): 
 export function dueDescription(date: string | null | undefined, now: Date = new Date()): string {
   if (!date) return "";
   const today = parseDateOnly(todayISO(now));
-  const due = parseDateOnly(date.slice(0, 10));
+  const due = parseDateOnly(toHouseDate(date));
   const diff = Math.round((due.getTime() - today.getTime()) / 86_400_000);
   if (diff === 0) return "due today";
   if (diff === 1) return "due tomorrow";

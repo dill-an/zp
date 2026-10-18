@@ -4,6 +4,8 @@ import {
   compareDates,
   dayOfWeek,
   dueDescription,
+  formatDate,
+  instantToDate,
   isoToLocalInput,
   localInputToISO,
   todayISO,
@@ -30,6 +32,12 @@ describe("calendar dates", () => {
     expect(dayOfWeek("2026-10-19")).toBe(1);
     expect(compareDates("2026-10-18", "2026-10-19")).toBeLessThan(0);
     expect(compareDates("2026-10-18", "2026-10-18")).toBe(0);
+  });
+
+  it("formats instants on the house calendar day", () => {
+    expect(formatDate("2026-10-19T03:59:00.000Z")).toBe("Oct 18");
+    expect(formatDate("2026-10-18", { year: true, weekday: true })).toBe("Sun, Oct 18, 2026");
+    expect(instantToDate("2026-12-14T04:30:00.000Z")).toBe("2026-12-13");
   });
 
   it("derives today in the house timezone", () => {
@@ -62,7 +70,9 @@ describe("due descriptions", () => {
     expect(dueDescription("2026-10-21", now)).toBe("due in 3 days");
     expect(dueDescription("2026-10-17", now)).toBe("1 day overdue");
     expect(dueDescription("2026-10-10", now)).toBe("8 days overdue");
-    expect(dueDescription("2026-10-20T03:00:00.000Z", now)).toBe("due in 2 days");
+    // 03:00Z on Oct 20 is still Oct 19 in New York.
+    expect(dueDescription("2026-10-20T03:00:00.000Z", now)).toBe("due tomorrow");
+    expect(dueDescription("2026-10-19T03:59:00.000Z", now)).toBe("due today");
     expect(dueDescription(null, now)).toBe("");
   });
 });
