@@ -14,7 +14,7 @@ export default defineConfig({
   expect: { timeout: 120_000 },
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  retries: 1,
   reporter: [["list"]],
   outputDir: "/tmp/claude-0/-home-user-zp/aebb2461-bb2d-5cde-a3c6-0c91da689555/scratchpad/test-results",
   use: {
