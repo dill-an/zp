@@ -142,7 +142,7 @@ test("events list filters by kind and hides manage controls from a plain brother
 test("admin posts a pinned announcement and an officers-only one; the brother sees only the first", async ({ browser }) => {
   const admin = await userPage(browser, ADMIN);
   const brother = await userPage(browser, BROTHER);
-  const publicTitle = uniq("Pinned news");
+  const publicTitle = uniq("House news");
   const officerTitle = uniq("Exec only");
 
   await admin.page.goto("/announcements/new");
@@ -154,7 +154,7 @@ test("admin posts a pinned announcement and an officers-only one; the brother se
   await admin.page.waitForURL(/\/announcements$/);
   const publicCard = admin.page.locator("[data-announcement-id]").filter({ hasText: publicTitle });
   await expect(publicCard).toBeVisible();
-  await expect(publicCard).toContainText("Pinned");
+  await expect(publicCard.getByText("Pinned", { exact: true })).toBeVisible();
   await expect(publicCard.locator("p").filter({ hasText: "Second paragraph" })).toContainText("line break");
 
   await admin.page.goto("/announcements/new");
@@ -179,7 +179,8 @@ test("admin posts a pinned announcement and an officers-only one; the brother se
   // Admin unpins and deletes the public one.
   await admin.page.goto("/announcements");
   await publicCard.getByRole("button", { name: "Unpin" }).click();
-  await expect(publicCard).not.toContainText("Pinned");
+  await expect(publicCard.getByRole("button", { name: "Pin", exact: true })).toBeVisible();
+  await expect(publicCard.getByText("Pinned", { exact: true })).toHaveCount(0);
   admin.page.once("dialog", (d) => d.accept());
   await publicCard.getByRole("button", { name: "Delete" }).click();
   await expect(admin.page.locator("[data-announcement-id]").filter({ hasText: publicTitle })).toHaveCount(0);
