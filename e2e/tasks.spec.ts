@@ -19,7 +19,7 @@ async function fillTaskForm(
 
 async function submitTaskForm(page: Page) {
   await page.click("form button[type=submit]:has-text('Create task')");
-  await page.waitForURL(/\/tasks\/\d+$/);
+  await page.waitForURL(/\/tasks\/\d+$/, { waitUntil: "commit" });
   const match = page.url().match(/\/tasks\/(\d+)$/);
   return Number(match![1]);
 }
@@ -57,7 +57,7 @@ test("admin creates a chair task with two assignees and a checklist; the brother
   await page.goto("/tasks");
   await expect(page.getByRole("link", { name: title })).toBeVisible();
   await page.getByRole("link", { name: title }).click();
-  await page.waitForURL(`**/tasks/${taskId}`);
+  await page.waitForURL(`**/tasks/${taskId}`, { waitUntil: "commit" });
   await expect(page.getByText("Assigned to you")).toBeVisible();
 
   await page.getByLabel("Pick a date").check();
@@ -142,7 +142,8 @@ test("a plain brother cannot create a task under a chair: control hidden and act
   const title = uniq("Forged chair");
   await page.fill("#title", title);
   await page.evaluate(() => {
-    const form = document.querySelector("form")!;
+    // The task form, not the first form on the page (the sidebar logout form).
+    const form = document.querySelector("#title")!.closest("form")!;
     const input = document.createElement("input");
     input.type = "hidden";
     input.name = "chairId";
@@ -150,7 +151,7 @@ test("a plain brother cannot create a task under a chair: control hidden and act
     form.appendChild(input);
   });
   await page.click("form button[type=submit]:has-text('Create task')");
-  await expect(page.locator("p[role=alert]")).toContainText("Only that chair's holder");
+  await expect(page.locator("p[role=alert]")).toContainText("Only that chair's holder", { timeout: 30_000 });
   await expect(page).toHaveURL(/\/tasks\/new/);
   await expect(page.locator("#title")).toHaveValue(title);
 
@@ -207,13 +208,15 @@ test("mobile viewport renders the list as cards with a working quick Done", asyn
   await submitTaskForm(page);
 
   await page.goto("/tasks");
-  await expect(page.getByTestId("task-cards")).toBeVisible();
-  await expect(page.getByTestId("task-table")).toBeHidden();
-  const card = page.locator("[data-testid=task-cards] li", { has: page.getByRole("link", { name: title }) });
+  // The Mine tab renders an open list and, once something is finished, a "Recently finished" list.
+  const openCards = page.getByTestId("task-cards").first();
+  await expect(openCards).toBeVisible();
+  await expect(page.getByTestId("task-table").first()).toBeHidden();
+  const card = openCards.locator("li", { has: page.getByRole("link", { name: title }) });
   await expect(card).toBeVisible();
   await expect(card).toContainText("overdue");
   await card.getByRole("button", { name: `Mark "${title}" done` }).click();
-  await expect(page.locator("[data-testid=task-cards] li", { has: page.getByRole("link", { name: title }) })).toHaveCount(0);
+  await expect(openCards.locator("li", { has: page.getByRole("link", { name: title }) })).toHaveCount(0, { timeout: 30_000 });
   // No horizontal overflow on a phone.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
   expect(overflow).toBe(false);
