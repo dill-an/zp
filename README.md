@@ -3,13 +3,15 @@
 Chapter management app for Zeta Psi at MIT. It replaces the cleans spreadsheet and the house meeting attendance sheet, and adds chair task boards, dues, sanctions, events and more. Built for phones first.
 
 ## What it does
+- **Dashboard and My week**: every brother lands on their own week: cleans with due days and a Mark done button, open tasks, event duties, sanctions, the next meeting, dues balance, announcements. Officers get a panel with their chairs' open tasks, unfilled slots, unverified cleans, outstanding dues and pending requests. "My week" is the same view as one page.
 - **Labor and cleans**: the weekly cleans grid (commons, bathrooms, kitchen shifts), a per-brother view of what everyone is doing each week, mark done / verify / missed, swaps and excuses, fairness stats (who has cleaned fewer than twice), auto-fill that balances the load, job type management.
 - **Chairs and tasks**: every officer position with its holder, responsibilities and a task board; tasks with assignees, due dates, checklists, comments, recurrence; "my tasks" for every brother.
 - **Dues**: semester periods, one-click billing, payments, balances, late fees, payment plans, CSV export; each brother sees what they owe and by when.
 - **Sanctions**: punishment jobs and fines with due dates, completion, verification, waivers and appeals; missed cleans and missed meetings can issue them automatically.
 - **Meetings and attendance**: house meetings, taking attendance on a phone, the semester attendance grid, excuse requests, absence fines.
 - **Events, announcements, maintenance**: RSVPs, sober monitor and setup duties, a calendar, pinned announcements by audience, house maintenance requests.
-- **Roster**: pledge classes, contact info, labor groups (cooks vs cleans), roles and permissions, password resets, audit log, database backup.
+- **Roster**: pledge classes, contact info, labor groups (cooks vs cleans), roles and permissions, password resets.
+- **Settings**: house settings (chapter name, semester, Venmo handle, meeting time, fine amounts), audit log of every change, one-click database backup.
 
 ## Run it locally
 Requires Node 22+.
@@ -49,7 +51,7 @@ Back up the database from Settings (admin) or by copying `data/zp.db` while the 
 | `npm run db:reset` | wipe and reseed `data/zp.db` |
 | `npm run typecheck`, `npm run lint` | checks |
 | `npm test` | unit tests (vitest) |
-| `npm run test:e2e` | browser tests (Playwright, starts its own server with a fresh `data/e2e.db`) |
+| `npm run test:e2e` | browser tests (Playwright, starts its own production server on a fresh `data/e2e.db`; run `npm run build` first) |
 
 ## Project layout
 - `src/db/schema.ts` database schema (Drizzle), `drizzle/` migrations, `src/db/seed-data/` the roster, cleans and chairs transcribed from the sheets
