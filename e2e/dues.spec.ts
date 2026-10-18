@@ -7,7 +7,8 @@ import { ADMIN, BROTHER, login, uniq } from "./helpers";
  * The admin and the brother each log in once (shared contexts) because every navigation is expensive on a dev server.
  */
 test.describe.configure({ mode: "serial" });
-test.use({ actionTimeout: 60_000, navigationTimeout: 120_000 });
+// Tracing is off because the admin and brother contexts outlive individual tests (retain-on-failure would delete their trace files mid-run).
+test.use({ actionTimeout: 60_000, navigationTimeout: 120_000, trace: "off" });
 const expect = baseExpect.configure({ timeout: 60_000 });
 
 const periodName = uniq("E2E Dues");
