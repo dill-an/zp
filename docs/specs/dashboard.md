@@ -16,6 +16,9 @@ Read the other modules' query files (`src/lib/queries/labor.ts`, `tasks.ts`, `du
 - "House pulse" (everyone): this week's labor completion (done or verified / assigned), last meeting attendance rate, open maintenance count, number of brothers with zero cleans this semester.
 Layout: a responsive grid of Cards; on a phone it is a single column in the order above.
 
+## My week (`/my-week`, everyone; replace the redirect stub, keep the nav entry "My week")
+One page that answers "what work is assigned to me this week": sections for this week's labor jobs (job, window, due day, state, Mark done), tasks assigned to me that are open (overdue first, due this week highlighted), event duties this week, open sanctions with due dates, meetings this week (with my excuse status), and a short "next week" preview of labor jobs. Each section links to its module page. Counts in the header ("5 things this week, 2 done"). Mobile first: single column of cards.
+
 ## Settings
 - `/settings` (everyone): my profile summary with links to `/members/[id]`, `/members/[id]/edit`, `/settings/password`; for `settings.manage`: "House settings" form saving with `setSetting` for every key in `SETTING_KEYS` (org name, chapter name, semester label, labor tracking start date, Venmo handle, house meeting weekday and time, missed clean fine dollars, missed meeting fine dollars) plus `sanctions_policy` is owned by the sanctions module (link to it). Data section: links to `/members/export`, `/dues/export`, and "Download database backup" (`/settings/backup` route handler, admin only: copy the SQLite file with `VACUUM INTO` to a temp file and stream it as `application/x-sqlite3` with a dated filename).
 - `/settings/audit` (`audit.view`): audit log, newest first, 50 per page (`?page=`), filters `actor=`, `entity=`, `q=`.

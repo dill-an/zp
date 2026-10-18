@@ -5,6 +5,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "House",
     items: [
       { href: "/dashboard", label: "Dashboard", icon: "home" },
+      { href: "/my-week", label: "My week", icon: "clipboard" },
       { href: "/announcements", label: "Announcements", icon: "megaphone" },
       { href: "/events", label: "Events", icon: "calendar" },
       { href: "/meetings", label: "Meetings", icon: "users" },
