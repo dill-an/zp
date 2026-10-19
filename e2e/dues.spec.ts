@@ -13,7 +13,8 @@ const expect = baseExpect.configure({ timeout: 60_000 });
 
 const periodName = uniq("E2E Dues");
 /** Seeded new member (Beta Beta); the period bills new members $0, so he is skipped. */
-const NEW_MEMBER_NAME = "Marcos Arroyo-Cruz";
+const NEW_MEMBER = { username: "marcos.arroyo-cruz", password: "zetapsi", name: "Marcos Arroyo-Cruz" };
+const NEW_MEMBER_NAME = NEW_MEMBER.name;
 let periodId = "";
 let brotherId = "";
 let adminId = "";
@@ -124,38 +125,49 @@ test("a brother sees the new charge as unpaid on /dues", async () => {
   await expect(page.getByRole("link", { name: "Export CSV" })).toHaveCount(0);
 });
 
-test("a fine due before the dues is named as a fine in the brother's headline", async () => {
+test("a fine due before the dues is named as a fine in the brother's headline", async ({ browser }) => {
+  // Billed by hand to the new member, whom billing skips ($0 new member amount) and the sanctions suite never fines,
+  // so the headline holds exactly these items on every run. Both charges are removed again at the end.
   const page = admin;
+  const duesNote = uniq(`${periodName} dues`);
   const fineNote = uniq("Fine: Missed clean");
-  await page.goto(`/dues/members/${brotherId}?period=${periodId}`);
-  await page.getByRole("button", { name: "Add charge" }).click();
-  const dialog = openDialog(page);
-  const c = `#charge-new-${brotherId}`;
-  await dialog.locator(`${c}-kind`).selectOption("fine");
-  await dialog.locator(`${c}-amount`).fill("25");
-  await dialog.locator(`${c}-description`).fill(fineNote);
-  await dialog.locator(`${c}-dueDate`).fill("2026-10-23");
-  await dialog.locator(`${c}-period`).selectOption(periodId);
-  await dialog.getByRole("button", { name: "Add charge" }).click();
-  await expect(dialog).toHaveCount(0);
-  const fineRow = page.locator("tr", { hasText: fineNote });
-  await expect(fineRow).toBeVisible();
+  const c = `#charge-new-${newMemberId}`;
+  await page.goto(`/dues/members/${newMemberId}?period=${periodId}`);
+  for (const charge of [
+    { kind: "dues", amount: "850", description: duesNote, dueDate: "2026-12-01" },
+    { kind: "fine", amount: "25", description: fineNote, dueDate: "2026-10-23" },
+  ]) {
+    await page.getByRole("button", { name: "Add charge" }).click();
+    const dialog = openDialog(page);
+    await dialog.locator(`${c}-kind`).selectOption(charge.kind);
+    await dialog.locator(`${c}-amount`).fill(charge.amount);
+    await dialog.locator(`${c}-description`).fill(charge.description);
+    await dialog.locator(`${c}-dueDate`).fill(charge.dueDate);
+    await dialog.locator(`${c}-period`).selectOption(periodId);
+    await dialog.getByRole("button", { name: "Add charge" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator("tr", { hasText: charge.description })).toBeVisible();
+  }
 
-  // The headline names the fine and keeps the dues as their own item with their own date, instead of
+  // The headline names the fine first and keeps the dues as their own item with their own date, instead of
   // "Due Oct 23" reading as if the semester's dues were due then.
-  await brother.goto("/dues");
-  const line = brother.getByTestId("my-due-line");
+  const { ctx, page: newMember } = await loggedInPage(browser, NEW_MEMBER);
+  await newMember.goto("/dues");
+  const line = newMember.getByTestId("my-due-line");
   await expect(line).toContainText("$25.00 fine due Oct 23");
-  await expect(line).toContainText(`$850.00 ${periodName} dues due Dec 1`);
+  await expect(line).toContainText(`$850.00 ${duesNote} due Dec 1`);
   const text = (await line.textContent()) ?? "";
-  expect(text.indexOf("$25.00 fine")).toBeLessThan(text.indexOf(`$850.00 ${periodName} dues`));
+  expect(text.indexOf("$25.00 fine")).toBeLessThan(text.indexOf(`$850.00 ${duesNote}`));
 
-  // Remove it so the rest of the file sees the plain $850 bill; the headline goes back to the dues alone.
-  await fineRow.getByRole("button", { name: "Delete" }).click();
+  // Without the fine the line is the dues alone; then the dues go too so nothing is left behind for the next run.
+  await page.locator("tr", { hasText: fineNote }).getByRole("button", { name: "Delete" }).click();
   await expect(page.locator("tr", { hasText: fineNote })).toHaveCount(0);
-  await brother.goto("/dues");
-  await expect(line).toContainText(`$850.00 ${periodName} dues due Dec 1`);
+  await newMember.goto("/dues");
+  await expect(line).toContainText(`$850.00 ${duesNote} due Dec 1`);
   await expect(line).not.toContainText("fine");
+  await page.locator("tr", { hasText: duesNote }).getByRole("button", { name: "Delete" }).click();
+  await expect(page.locator("tr", { hasText: duesNote })).toHaveCount(0);
+  await ctx.close();
 });
 
 test("a failed submit keeps what the treasurer typed, including the selects", async () => {
