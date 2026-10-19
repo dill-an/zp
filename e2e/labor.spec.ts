@@ -264,7 +264,9 @@ test.describe.serial("labor", () => {
     await expect(page.getByText("Group load")).toBeVisible();
     await expect(page.getByText("Brothers with fewer than 2 jobs")).toBeVisible();
     await expect(page.getByText("Per brother")).toBeVisible();
-    await expect(page.getByText("Not tracked", { exact: true })).toBeVisible();
+    // The "Not tracked" stat tile (the per-brother table repeats the label as a column header).
+    await expect(page.getByText("Not tracked", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Not tracked" })).toBeVisible();
     // Default scope is the cleans group: only its rows, its load row and its threshold list are shown.
     const scopes = page.getByRole("group", { name: "Labor group" });
     await expect(scopes.getByRole("link", { name: "Cleans" })).toHaveAttribute("aria-current", "true");
