@@ -21,6 +21,12 @@ const expect = baseExpect.configure({ timeout: 20_000 });
 const OUTSIDER = { username: "marcos.arroyo-cruz", password: "zetapsi" };
 
 const WEEK = uniqueFutureSunday();
+/** A second far-future Sunday for the auto-fill flow, never the same as WEEK. */
+const WEEK_AUTO = (() => {
+  let w = uniqueFutureSunday();
+  while (w === WEEK) w = new Date(Date.parse(`${w}T00:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
+  return w;
+})();
 const JOB_DONE = "Upstairs Commons"; // Martin: marks done, admin verifies
 const JOB_MISSED = "Basement Commons"; // Gio: admin marks missed -> sanction
 const JOB_SWAP = "Basement Bathroom"; // Martin -> swap to Gio; Martin's stale excuse must not excuse Gio
@@ -30,6 +36,28 @@ const JOB_EXCUSE = "2nd Floor Bathroom"; // Gio: excuse request approved
 async function switchUser(page: Page, user: { username: string; password: string }) {
   await logout(page);
   await login(page, user);
+}
+
+/**
+ * Replace the Clipboard API with a stub that records what was written, so "Copy as text" can be
+ * checked without clipboard permissions. Registered before navigation; applies to later page loads.
+ */
+async function stubClipboard(page: Page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          (window as unknown as { __copied?: string }).__copied = text;
+          return Promise.resolve();
+        },
+      },
+    });
+  });
+}
+
+async function copiedText(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as { __copied?: string }).__copied ?? "");
 }
 
 async function assignRow(page: Page, job: string, brotherLabel: string) {
@@ -88,12 +116,26 @@ test.describe.serial("labor", () => {
     await expect(doneRow.getByText("Upcoming")).toBeVisible();
   });
 
-  test("cleaner sees the job on My jobs, marks it done and requests a swap and an excuse", async ({ page }) => {
+  test("cleaner sees the job on My jobs, copies it as text, marks it done and requests a swap and an excuse", async ({ page }) => {
+    await stubClipboard(page);
     await login(page, CLEANER);
     await page.goto("/labor/me");
     await expect(page.getByRole("heading", { level: 1, name: "My jobs" })).toBeVisible();
     const card = page.locator(`li[data-week="${WEEK}"][data-job="${JOB_DONE}"]`);
     await expect(card).toBeVisible();
+    // The relative due text is separated from the date ("due Wed, Oct 21 · (due in 3 days)"), not glued to it.
+    await expect(card.locator("p").filter({ hasText: /due \w{3}, \w{3} \d+ · \(due in \d+ days\)/ })).toBeVisible();
+
+    const copy = page.getByTestId("copy-text");
+    await copy.click();
+    await expect(copy).toHaveText("Copied");
+    const mine = await copiedText(page);
+    expect(mine).toContain("Martin Meister: my jobs");
+    expect(mine).toContain("Later");
+    expect(mine).toContain(`- ${JOB_DONE} (Mon-Wed), due`);
+    expect(mine).toContain(`- ${JOB_SWAP} (Sat-Sun), due`);
+    await expect(copy).toHaveText("Copy as text");
+
     await card.getByRole("button", { name: "Mark done" }).click();
     await expect(card.getByText("Done", { exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Undo" })).toBeVisible();
@@ -193,6 +235,9 @@ test.describe.serial("labor", () => {
     await missed.getByRole("button", { name: "Mark missed" }).click();
     const dialog = page.locator("dialog[open]");
     await expect(dialog.locator("input[name=issueSanction]")).toBeChecked();
+    // The job is due three days into a far-future week: the dialog says when and warns it is not due yet.
+    await expect(dialog.getByTestId("missed-due")).toHaveText(/^Due \w{3}, \w{3} \d+, \d{4}$/);
+    await expect(dialog.getByTestId("missed-not-due")).toContainText(/This job is not due until \w{3} \d+\./);
     await dialog.getByRole("button", { name: "Mark missed" }).click();
     await expect(dialog.getByRole("status")).toContainText("sanction");
     await expect(page.locator("dialog[open]")).toHaveCount(0);
@@ -216,9 +261,53 @@ test.describe.serial("labor", () => {
 
     await page.goto("/labor/stats?min=2");
     await expect(page.getByRole("heading", { level: 1, name: "Fairness" })).toBeVisible();
-    await expect(page.getByText("Cooks vs cleans")).toBeVisible();
+    await expect(page.getByText("Group load")).toBeVisible();
     await expect(page.getByText("Brothers with fewer than 2 jobs")).toBeVisible();
     await expect(page.getByText("Per brother")).toBeVisible();
+    await expect(page.getByText("Not tracked", { exact: true })).toBeVisible();
+    // Default scope is the cleans group: only its rows, its load row and its threshold list are shown.
+    const scopes = page.getByRole("group", { name: "Labor group" });
+    await expect(scopes.getByRole("link", { name: "Cleans" })).toHaveAttribute("aria-current", "true");
+    await expect(page.locator("tbody[data-section=cleans]")).toBeVisible();
+    await expect(page.locator("tbody[data-section=cooks]")).toHaveCount(0);
+    await expect(page.locator("tr[data-group=cleans]")).toBeVisible();
+    await expect(page.locator("tr[data-group=cooks]")).toHaveCount(0);
+    // Names use displayName: "David Santana", never "Santana Santana"; "David Coll", never "David Coll Coll Leon".
+    await expect(page.locator("tbody[data-section=cleans]").getByRole("link", { name: "David Santana", exact: true })).toBeVisible();
+    await expect(page.getByText("Santana Santana")).toHaveCount(0);
+    await expect(page.getByText("Coll Coll Leon")).toHaveCount(0);
+
+    await scopes.getByRole("link", { name: "Cooks" }).click();
+    await expect(page).toHaveURL(/group=cooks/);
+    await expect(scopes.getByRole("link", { name: "Cooks" })).toHaveAttribute("aria-current", "true");
+    await expect(page.locator("tbody[data-section=cooks]")).toBeVisible();
+    await expect(page.locator("tbody[data-section=cleans]")).toHaveCount(0);
+    await expect(page.locator("tr[data-group=cooks]")).toBeVisible();
+    await expect(page.locator("tr[data-group=cleans]")).toHaveCount(0);
+    await expect(page.locator(`tbody[data-section=cooks] tr[data-member="${BROTHER.username}"]`)).toBeVisible();
+
+    await page.goto("/labor/stats?group=all&min=3");
+    await expect(page.locator("tbody[data-section=cleans]")).toBeVisible();
+    await expect(page.locator("tbody[data-section=cooks]")).toBeVisible();
+    await expect(page.locator("tr[data-group=cleans]")).toBeVisible();
+    await expect(page.locator("tr[data-group=cooks]")).toBeVisible();
+    await expect(page.getByText("Brothers with fewer than 3 jobs")).toBeVisible();
+  });
+
+  test("steward finds the seeded cook shifts under archived job types and can restore them", async ({ page }) => {
+    await login(page, ADMIN);
+    await page.goto("/labor/jobs");
+    const row = page.locator('tr[data-jobtype="Dinner cook (Mon)"]');
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("Meals");
+    await expect(row).toContainText("+1d");
+    await expect(row.getByRole("button", { name: "Restore" })).toBeVisible();
+    for (const day of ["Tue", "Wed", "Thu", "Sun"]) await expect(page.locator(`tr[data-jobtype="Dinner cook (${day})"]`).getByRole("button", { name: "Restore" })).toBeVisible();
+    // Restore moves it to the active list (Archive offered); archive it again so the suite can repeat.
+    await row.getByRole("button", { name: "Restore" }).click();
+    await expect(row.getByRole("button", { name: "Archive" })).toBeVisible();
+    await row.getByRole("button", { name: "Archive" }).click();
+    await expect(row.getByRole("button", { name: "Restore" })).toBeVisible();
   });
 
   test("admin keeps what they typed when a job type fails validation, then creates and deletes it", async ({ page }) => {
@@ -278,6 +367,51 @@ test.describe.serial("labor", () => {
     await expect(page.getByText("Away that weekend")).toHaveCount(0);
   });
 
+  test("auto-fill creates a draft that spreads jobs, brothers cannot see it until it is published, and the week copies as text", async ({ page }) => {
+    await stubClipboard(page);
+    await login(page, ADMIN);
+    await page.goto(`/labor/week/${WEEK_AUTO}`);
+    await page.getByRole("button", { name: "Auto-fill" }).click();
+    await page.waitForURL(new RegExp(`/labor/week/${WEEK_AUTO}\\?manage=1`));
+    await expect(page.getByTestId("draft-notice")).toContainText("Draft: review the schedule, then Publish");
+    await expect(page.getByText("Draft, not posted")).toBeVisible();
+    // Fairness: with the whole pool available nobody gets more than two jobs, and every slot is filled.
+    const picked = (await page.locator("tr[data-job] select[name^=slot_] option:checked").allTextContents()).map((t) => t.trim()).filter((t) => t && t !== "Open");
+    expect(picked.length).toBeGreaterThan(0);
+    const perBrother = new Map<string, number>();
+    for (const name of picked) perBrother.set(name, (perBrother.get(name) ?? 0) + 1);
+    expect(Math.max(...perBrother.values())).toBeLessThanOrEqual(2);
+    await expect(page.locator("tr[data-job] select[name^=slot_] option:checked", { hasText: "Open" })).toHaveCount(0);
+
+    await switchUser(page, BROTHER);
+    await page.goto(`/labor/week/${WEEK_AUTO}`);
+    await expect(page.getByText("Not posted yet")).toBeVisible();
+    await expect(page.locator("tr[data-job]")).toHaveCount(0);
+
+    await switchUser(page, ADMIN);
+    await page.goto(`/labor/week/${WEEK_AUTO}?manage=1`);
+    await page.getByRole("button", { name: "Publish" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Week posted." })).toBeVisible();
+    await expect(page.getByTestId("draft-notice")).toHaveCount(0);
+
+    await page.goto(`/labor/week/${WEEK_AUTO}`);
+    const copy = page.getByTestId("copy-text");
+    await copy.click();
+    await expect(copy).toHaveText("Copied");
+    const text = await copiedText(page);
+    expect(text.startsWith("Jobs for the week of ")).toBe(true);
+    expect(text).toContain("\n\nCommons\nUpstairs Commons (Mon-Wed): ");
+    expect(text).toMatch(/\nMonday Kitchen: [^,\n]+, [^,\n]+\n/);
+    expect(text).not.toContain("open");
+
+    page.on("dialog", (d) => d.accept());
+    await page.goto(`/labor/week/${WEEK_AUTO}?manage=1`);
+    await page.getByRole("button", { name: "Delete week" }).click();
+    await page.waitForURL(/\/labor$/);
+    await page.goto(`/labor/week/${WEEK_AUTO}`);
+    await expect(page.getByRole("button", { name: "Auto-fill" })).toBeVisible();
+  });
+
   test("mobile viewport renders the grid, brothers and stats without horizontal page overflow", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await login(page, CLEANER);
@@ -292,8 +426,22 @@ test.describe.serial("labor", () => {
     await page.goto("/labor/brothers");
     const overflow2 = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow2).toBeLessThanOrEqual(0);
+    // The grid scrolls itself so this week's column is in view next to the sticky name column, not the oldest week.
+    await expect(page.locator("th[data-current-week]")).toBeAttached();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const grid = document.querySelector<HTMLElement>("[data-testid=brothers-grid]")!;
+          const th = grid.querySelector<HTMLElement>("th[data-current-week]")!;
+          const sticky = grid.querySelector<HTMLElement>("[data-sticky-col]")!;
+          const g = grid.getBoundingClientRect();
+          const t = th.getBoundingClientRect();
+          return { scrolled: grid.scrollLeft > 0, left: t.left >= g.left + sticky.getBoundingClientRect().width - 1, right: t.right <= g.right + 1 };
+        }),
+      )
+      .toEqual({ scrolled: true, left: true, right: true });
     await page.goto("/labor/stats");
-    await expect(page.getByText("Cooks vs cleans")).toBeVisible();
+    await expect(page.getByText("Group load")).toBeVisible();
     const overflow3 = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow3).toBeLessThanOrEqual(0);
   });

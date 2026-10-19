@@ -1,23 +1,30 @@
 import { test, expect, type Page } from "@playwright/test";
-import { ADMIN, BROTHER, CLEANER, login as rawLogin, logout, uniq } from "./helpers";
+import { ADMIN, BROTHER, CLEANER, logout, uniq } from "./helpers";
 
 // Dev servers shared with other agents compile slowly; give each test room.
 test.setTimeout(240_000);
 
 /**
- * Logs in with the shared helper; if that fails (slow compile, or another module's dashboard
- * erroring mid-edit), fall back to a login that only waits for the post-login redirect.
+ * Logs in with bounded waits and a few retries instead of the shared helper: on a dev server shared with
+ * other agents, a Fast Refresh reload from their saves can wipe the form before submit, and one lost
+ * submit should cost seconds rather than the whole test budget.
  */
 async function login(page: Page, user: { username: string; password: string } = ADMIN) {
-  try {
-    await rawLogin(page, user);
-  } catch {
-    await page.goto("/login", { waitUntil: "commit" }).catch(() => {});
-    await page.fill("#username", user.username);
-    await page.fill("#password", user.password);
-    await page.click("form button[type=submit]");
-    await page.waitForURL(/\/dashboard/, { waitUntil: "commit" });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      await page.goto("/login", { waitUntil: "commit" });
+      if (/\/dashboard/.test(page.url())) return; // an earlier submit did land
+      await page.fill("#username", user.username, { timeout: 15_000 });
+      await page.fill("#password", user.password, { timeout: 15_000 });
+      await page.click("form button[type=submit]", { timeout: 15_000 });
+      await page.waitForURL(/\/dashboard/, { waitUntil: "commit", timeout: 30_000 });
+      return;
+    } catch (e) {
+      lastError = e;
+    }
   }
+  throw lastError;
 }
 
 /** Lowercase alphanumeric tag (no dashes) so it survives slugging into usernames and chair slugs. */

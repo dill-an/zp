@@ -267,7 +267,8 @@ describe("laborStats", () => {
     expect(stats.totals).toMatchObject({ assignments: 5, notTracked: 2, done: 1, missed: 1 });
     // Without a tracking start (or without week starts) nothing is untracked.
     expect(laborStats(tracked, [commons, monKitchen], members).totals.notTracked).toBe(0);
-    expect(laborStats(tracked.map(({ weekStart: _w, ...rest }) => rest), [commons, monKitchen], members, { trackingStart: "2026-10-18" }).totals.notTracked).toBe(0);
+    const undated = tracked.map((a) => ({ jobTypeId: a.jobTypeId, memberId: a.memberId, status: a.status }));
+    expect(laborStats(undated, [commons, monKitchen], members, { trackingStart: "2026-10-18" }).totals.notTracked).toBe(0);
     expect(donePercent(2, 1)).toBe(67);
     expect(donePercent(0, 0)).toBeNull();
   });

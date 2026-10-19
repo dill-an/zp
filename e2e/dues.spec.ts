@@ -40,6 +40,8 @@ async function loggedInPage(browser: Browser, user: { username: string; password
 test.beforeAll(async ({ browser }) => {
   ({ ctx: adminCtx, page: admin } = await loggedInPage(browser, ADMIN));
   ({ ctx: brotherCtx, page: brother } = await loggedInPage(browser, BROTHER));
+  // Delete buttons ask with window.confirm.
+  admin.on("dialog", (d) => d.accept());
 });
 
 test.afterAll(async () => {
@@ -120,6 +122,40 @@ test("a brother sees the new charge as unpaid on /dues", async () => {
   // No treasurer controls for a plain brother.
   await expect(page.getByRole("link", { name: "Bill members" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Export CSV" })).toHaveCount(0);
+});
+
+test("a fine due before the dues is named as a fine in the brother's headline", async () => {
+  const page = admin;
+  const fineNote = uniq("Fine: Missed clean");
+  await page.goto(`/dues/members/${brotherId}?period=${periodId}`);
+  await page.getByRole("button", { name: "Add charge" }).click();
+  const dialog = openDialog(page);
+  const c = `#charge-new-${brotherId}`;
+  await dialog.locator(`${c}-kind`).selectOption("fine");
+  await dialog.locator(`${c}-amount`).fill("25");
+  await dialog.locator(`${c}-description`).fill(fineNote);
+  await dialog.locator(`${c}-dueDate`).fill("2026-10-23");
+  await dialog.locator(`${c}-period`).selectOption(periodId);
+  await dialog.getByRole("button", { name: "Add charge" }).click();
+  await expect(dialog).toHaveCount(0);
+  const fineRow = page.locator("tr", { hasText: fineNote });
+  await expect(fineRow).toBeVisible();
+
+  // The headline names the fine and keeps the dues as their own item with their own date, instead of
+  // "Due Oct 23" reading as if the semester's dues were due then.
+  await brother.goto("/dues");
+  const line = brother.getByTestId("my-due-line");
+  await expect(line).toContainText("$25.00 fine due Oct 23");
+  await expect(line).toContainText(`$850.00 ${periodName} dues due Dec 1`);
+  const text = (await line.textContent()) ?? "";
+  expect(text.indexOf("$25.00 fine")).toBeLessThan(text.indexOf(`$850.00 ${periodName} dues`));
+
+  // Remove it so the rest of the file sees the plain $850 bill; the headline goes back to the dues alone.
+  await fineRow.getByRole("button", { name: "Delete" }).click();
+  await expect(page.locator("tr", { hasText: fineNote })).toHaveCount(0);
+  await brother.goto("/dues");
+  await expect(line).toContainText(`$850.00 ${periodName} dues due Dec 1`);
+  await expect(line).not.toContainText("fine");
 });
 
 test("a failed submit keeps what the treasurer typed, including the selects", async () => {
@@ -214,6 +250,17 @@ test("admin records a partial payment and the brother's status becomes partial",
   await expect(dialog).toHaveCount(0);
   await expect(page.locator("[data-testid^=ledger-payment-]").first()).toContainText("$400.00");
 
+  // The charge was billed today and the payment is dated today: the ledger (newest first) still keeps the payment
+  // after the charge it pays for, so the balance after each row is 850 then 450, never a negative number.
+  await page.goto(`/dues/members/${brotherId}?period=${periodId}`);
+  const ledgerRows = page.locator("tbody tr[data-testid^=ledger-]");
+  await expect(ledgerRows).toHaveCount(2);
+  await expect(ledgerRows.first()).toHaveAttribute("data-testid", /^ledger-payment-/);
+  await expect(ledgerRows.first()).toContainText("$450.00");
+  await expect(ledgerRows.nth(1)).toHaveAttribute("data-testid", /^ledger-charge-/);
+  await expect(ledgerRows.nth(1)).toContainText("$850.00");
+  await expect(page.locator("tbody")).not.toContainText("credit");
+
   await page.goto(`/dues?period=${periodId}`);
   const row = page.getByTestId(`member-row-${brotherId}`);
   await expect(row).toContainText("Partial");
@@ -252,6 +299,16 @@ test("a full payment makes it paid, and a credit charge shows on the ledger", as
 
   await page.goto(`/dues?period=${periodId}`);
   await expect(page.getByTestId(`member-row-${brotherId}`)).toContainText("Paid");
+
+  // The "N of M brothers" line counts the rows the status filter leaves, not everyone.
+  await page.goto(`/dues?period=${periodId}&status=paid`);
+  await expect(page.getByTestId(`member-row-${brotherId}`)).toBeVisible();
+  await expect(page.getByTestId(`member-row-${cleanerId}`)).toHaveCount(0);
+  const shown = await page.locator("[data-testid^=member-row-]").count();
+  const countLine = (await page.getByTestId("member-count").textContent()) ?? "";
+  const [, n, m] = countLine.match(/^(\d+) of (\d+) brothers$/) ?? [];
+  expect(Number(n)).toBe(shown);
+  expect(Number(m)).toBeGreaterThan(shown);
 
   await brother.goto("/dues");
   const row = brother.getByTestId(`period-row-${periodId}`);

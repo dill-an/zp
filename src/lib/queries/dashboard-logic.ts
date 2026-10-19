@@ -167,13 +167,14 @@ export function buildWaitingItems(input: WaitingInput, now: Date = new Date()): 
   const me = input.memberId;
   const items: WaitingItem[] = [];
 
-  for (const s of input.swaps) {
-    if (s.status !== "pending" || s.requestedById === me || !s.jobOpen) continue;
-    if (s.targetMemberId === me) {
-      items.push({ key: `swap-${s.id}`, kind: "swap_for_me", title: `${s.requesterName} asked you to take ${s.jobName}`, detail: `${weekOf(s.weekStart)} · accept or decline on Swaps`, href: "/labor/swaps", tone: "warning" });
-    } else if (s.targetMemberId == null && input.inLaborPool) {
-      items.push({ key: `swap-${s.id}`, kind: "swap_open", title: `${s.requesterName} needs someone to take ${s.jobName}`, detail: `${weekOf(s.weekStart)} · open to anyone, claim it on Swaps`, href: "/labor/swaps", tone: "info" });
-    }
+  const pendingSwaps = input.swaps.filter((s) => s.status === "pending" && s.requestedById !== me && s.jobOpen);
+  for (const s of pendingSwaps) {
+    if (s.targetMemberId !== me) continue;
+    items.push({ key: `swap-${s.id}`, kind: "swap_for_me", title: `${s.requesterName} asked you to take ${s.jobName}`, detail: `${weekOf(s.weekStart)} · accept or decline on Swaps`, href: "/labor/swaps", tone: "warning" });
+  }
+  for (const s of pendingSwaps) {
+    if (s.targetMemberId != null || !input.inLaborPool) continue;
+    items.push({ key: `swap-${s.id}`, kind: "swap_open", title: `${s.requesterName} needs someone to take ${s.jobName}`, detail: `${weekOf(s.weekStart)} · open to anyone, claim it on Swaps`, href: "/labor/swaps", tone: "info" });
   }
 
   for (const d of input.duties) {

@@ -13,7 +13,7 @@ import { isoToLocalInput, localInputToISO, nowISO } from "@/lib/dates";
 import { formatCents, parseDollarsToCents } from "@/lib/money";
 import { displayName } from "@/lib/names";
 import { can } from "@/lib/permissions";
-import { setSetting } from "@/lib/settings";
+import { SETTING_KEYS, setSetting } from "@/lib/settings";
 import { appendAppealNote, nextStatus, SANCTIONS_POLICY_KEY, type SanctionAction } from "@/lib/queries/sanctions-logic";
 
 /* ------------------------------------------------------------------ */
@@ -78,6 +78,11 @@ const appealSchema = z.object({
 
 const policySchema = z.object({
   policy: z.string().trim().max(20000).optional(),
+});
+
+const boardVisibilitySchema = z.object({
+  /** Checkbox: present when the house board should be visible to every brother. */
+  public: z.string().optional(),
 });
 
 function revalidateSanction(id?: number, memberId?: number) {
@@ -388,5 +393,26 @@ export async function savePolicy(_prev: ActionResult | null, formData: FormData)
     });
     revalidatePath("/sanctions/policy");
     return ok("Policy saved.");
+  });
+}
+
+/** Show or hide the read-only house board (open and recently done punishment jobs) from brothers without sanctions.manage. */
+export async function saveBoardVisibility(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  return runAction(async () => {
+    const user = await requirePermissionForAction("sanctions.manage");
+    const parsed = parseForm(boardVisibilitySchema, formData);
+    if ("result" in parsed) return parsed.result;
+    const visible = !!parsed.data.public;
+    setSetting(SETTING_KEYS.sanctionsBoardPublic, visible ? "1" : "0");
+    logAudit({
+      actorId: user.id,
+      action: "sanctions.board.visibility",
+      entityType: "setting",
+      entityId: SETTING_KEYS.sanctionsBoardPublic,
+      summary: `${displayName(user)} ${visible ? "made the house board visible to every brother" : "hid the house board from brothers"}`,
+    });
+    revalidatePath("/sanctions");
+    revalidatePath("/sanctions/policy");
+    return ok(visible ? "Every brother can now open the house board." : "The house board is hidden from brothers.");
   });
 }

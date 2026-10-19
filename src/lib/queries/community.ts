@@ -147,6 +147,43 @@ export function getMyDuties(memberId: number): MyDuty[] {
     .map((r) => ({ ...r.duty, event: r.event }));
 }
 
+/** An event a brother is involved in: RSVP'd (any answer) or holding a duty there. */
+export type MemberCalendarEvent = { event: Event; rsvp: RsvpStatus | null; duties: EventDuty[] };
+
+/**
+ * Events starting in [fromIso, toIso) where the member has an RSVP or a duty, ordered by start.
+ * Feeds the per-member calendar subscription.
+ */
+export function getMemberCalendarEvents(memberId: number, fromIso: string, toIso: string): MemberCalendarEvent[] {
+  const rows = db
+    .select()
+    .from(events)
+    .where(and(gte(events.startsAt, fromIso), lt(events.startsAt, toIso)))
+    .orderBy(asc(events.startsAt), asc(events.id))
+    .all();
+  if (rows.length === 0) return [];
+  const ids = rows.map((e) => e.id);
+  const rsvps = new Map(
+    db
+      .select({ eventId: eventRsvps.eventId, status: eventRsvps.status })
+      .from(eventRsvps)
+      .where(and(eq(eventRsvps.memberId, memberId), inArray(eventRsvps.eventId, ids)))
+      .all()
+      .map((r) => [r.eventId, r.status]),
+  );
+  const duties = db
+    .select()
+    .from(eventDuties)
+    .where(and(eq(eventDuties.memberId, memberId), inArray(eventDuties.eventId, ids)))
+    .orderBy(asc(eventDuties.id))
+    .all();
+  return rows.flatMap((event) => {
+    const rsvp = rsvps.get(event.id) ?? null;
+    const mine = duties.filter((d) => d.eventId === event.id);
+    return rsvp || mine.length ? [{ event, rsvp, duties: mine }] : [];
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Calendar                                                            */
 /* ------------------------------------------------------------------ */

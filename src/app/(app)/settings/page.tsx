@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { requireUser } from "@/lib/auth";
+import { calendarFeedUrls, calendarTokenFor, publicBaseUrl } from "@/lib/calendar";
 import { formatDateTime } from "@/lib/dates";
 import { displayName, initials } from "@/lib/names";
 import { can } from "@/lib/permissions";
@@ -13,6 +15,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status-pill";
+import { CalendarSubscribe } from "./calendar-subscribe";
 import { HouseSettingsForm } from "./house-settings-form";
 
 export const metadata = { title: "Settings" };
@@ -22,6 +25,8 @@ export default async function SettingsPage() {
   const profile = getMemberProfile(user.id);
   const manageSettings = can(user, "settings.manage");
   const settings = manageSettings ? getSettings() : null;
+  const requestHeaders = await headers();
+  const feed = calendarFeedUrls(publicBaseUrl((name) => requestHeaders.get(name)), calendarTokenFor(user.id));
   const dataLinks = [
     can(user, "members.manage") ? { href: "/members/export", label: "Export roster (CSV)", hint: "Every member with contact details." } : null,
     can(user, "dues.manage") ? { href: "/dues/export", label: "Export dues (CSV)", hint: "Balances for the active period." } : null,
@@ -70,6 +75,27 @@ export default async function SettingsPage() {
               </div>
               {user.mustChangePassword ? <p className="mt-2 text-sm text-warning">You still need to change your temporary password.</p> : null}
             </div>
+          </CardContent>
+        </Card>
+
+        <Card data-testid="calendar-card">
+          <CardHeader>
+            <div>
+              <CardTitle>Subscribe in your calendar</CardTitle>
+              <CardDescription>Your cleans, events and duties, house meetings and sanction deadlines, kept up to date on your phone.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <CalendarSubscribe webcalUrl={feed.webcal} httpsUrl={feed.https} />
+            <ul className="space-y-1 text-sm text-muted">
+              <li>
+                <span className="font-medium text-text">iPhone:</span> open the webcal link in Safari and tap Subscribe, or go to Settings, Calendar, Accounts, Add Subscribed Calendar and paste the feed URL.
+              </li>
+              <li>
+                <span className="font-medium text-text">Google Calendar:</span> on the web, next to Other calendars press +, choose From URL and paste the feed URL.
+              </li>
+            </ul>
+            <p className="text-xs text-muted">The link is private to you: anyone who has it can read your schedule, so do not share it.</p>
           </CardContent>
         </Card>
 

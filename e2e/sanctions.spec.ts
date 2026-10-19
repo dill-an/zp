@@ -199,6 +199,68 @@ test("admin sees the appeal on the board and reopens it", async ({ page }) => {
   await expect(page.locator(`tr[data-sanction-id="${sanction4}"]`).getByText("Open", { exact: true })).toBeVisible();
 });
 
+/** Sets the house board setting on the policy page (admin must be logged in). */
+async function setBoardVisible(page: Page, visible: boolean) {
+  await page.goto("/sanctions/policy");
+  const toggle = page.locator("#board-public");
+  if (visible) await toggle.check();
+  else await toggle.uncheck();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator("[data-testid=board-visibility-card] p[role=status]")).toHaveText(visible ? "Every brother can now open the house board." : "The house board is hidden from brothers.");
+}
+
+test("every brother can read the house board, and standards can switch it off", async ({ page }) => {
+  // The board is on by default; a run that stopped halfway may have left it off, so set it explicitly.
+  await login(page, ADMIN);
+  await setBoardVisible(page, true);
+
+  await switchUser(page, BROTHER);
+  await page.goto("/sanctions");
+  await page.getByRole("link", { name: "House board" }).click();
+  await page.waitForURL(/\/sanctions\?board=1$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("House board");
+  const main = page.locator("main");
+  await expect(page.getByTestId("house-board-counts")).toContainText("Open jobs");
+  await expect(page.getByTestId("house-board-counts")).toContainText("Done this semester");
+  // Martin's open job is listed with his name and the job; Gio's verified one is under done.
+  const openRow = main.locator(`[data-testid=house-board-open] tr[data-sanction-id="${sanction3}"]`);
+  await expect(openRow).toBeVisible();
+  await expect(openRow).toContainText(CLEANER.name);
+  await expect(openRow).toContainText("Take out the recycling");
+  await expect(openRow).toContainText("Open");
+  const doneRow = main.locator(`[data-testid=house-board-done] tr[data-sanction-id="${sanction1}"]`);
+  await expect(doneRow).toBeVisible();
+  await expect(doneRow).toContainText(BROTHER.name);
+  await expect(doneRow).toContainText("Deep clean the basement bathroom");
+  await expect(doneRow).toContainText("Verified");
+  // A sanction without a job shows its reason; the waived one is not on the board at all.
+  await expect(main.locator(`tr[data-sanction-id="${sanction4}"]`)).toContainText("hours or fine only");
+  await expect(main.locator(`[data-sanction-id="${sanction2}"]`)).toHaveCount(0);
+  // Nothing private: no fine amounts, no appeal text, and no links into other brothers' sanctions (those 404).
+  await expect(main).not.toContainText("$25.00");
+  await expect(main).not.toContainText("$10.00");
+  await expect(main).not.toContainText("conference");
+  await expect(main.locator(`a[href="/sanctions/${sanction3}"]`)).toHaveCount(0);
+  // A plain brother has no toggle.
+  await page.goto("/sanctions/policy");
+  await expect(page.locator("#board-public")).toHaveCount(0);
+
+  // Standards turns it off: the tab is gone and ?board=1 falls back to the brother's own list.
+  await switchUser(page, ADMIN);
+  await setBoardVisible(page, false);
+  await switchUser(page, BROTHER);
+  await page.goto("/sanctions?board=1");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("My sanctions");
+  await expect(page.getByRole("link", { name: "House board" })).toHaveCount(0);
+
+  // And back on, which is also the default for the next run.
+  await switchUser(page, ADMIN);
+  await setBoardVisible(page, true);
+  await switchUser(page, BROTHER);
+  await page.goto("/sanctions");
+  await expect(page.getByRole("link", { name: "House board" })).toBeVisible();
+});
+
 test("policy edit saves and brothers can read it", async ({ page }) => {
   await login(page, ADMIN);
   await page.goto("/sanctions/policy");
@@ -224,6 +286,13 @@ test("mobile viewport renders the list for a brother and the board for a manager
   await expect(page.locator(`li[data-sanction-id="${sanction1}"]`).getByText("$25.00")).toBeVisible();
   const overflows = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
   expect(overflows).toBe(false);
+  // The house board stacks cards on a phone too.
+  await page.goto("/sanctions?board=1");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("House board");
+  await expect(page.locator(`ul li[data-sanction-id="${sanction3}"]`)).toBeVisible();
+  await expect(page.locator(`tr[data-sanction-id="${sanction3}"]`)).toBeHidden();
+  const boardCardsOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+  expect(boardCardsOverflow).toBe(false);
 
   await switchUser(page, ADMIN);
   await page.goto("/sanctions?tab=all");

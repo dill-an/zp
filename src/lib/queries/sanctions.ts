@@ -6,10 +6,13 @@ import { auditLog, charges, members, sanctions, type AuditEntry, type Charge, ty
 import { displayName } from "@/lib/names";
 import {
   filterSanctions,
+  houseBoard,
   isOverdue,
   sanctionStats,
   sortSanctions,
   summarizeJobs,
+  type HouseBoardCounts,
+  type HouseBoardRow,
   type JobSummary,
   type SanctionFilters,
   type SanctionStats,
@@ -148,4 +151,18 @@ export function getSanctionStats(now: Date = new Date()): SanctionStats {
 /** Punishment jobs grouped by description: how many have done each, who still needs to. */
 export function getJobSummary(now: Date = new Date()): JobSummary[] {
   return summarizeJobs(listSanctions({}, now));
+}
+
+export type HouseBoardEntry = HouseBoardRow & { member: MemberRef };
+
+/** The read-only house board every brother may see: outstanding jobs, this semester's done jobs and the counts. */
+export function getHouseBoard(now: Date = new Date()): { open: HouseBoardEntry[]; done: HouseBoardEntry[]; counts: HouseBoardCounts } {
+  const rows = listSanctions({}, now);
+  const membersById = new Map(rows.map((r) => [r.memberId, r.member]));
+  const board = houseBoard(rows, now);
+  const attach = (r: HouseBoardRow): HouseBoardEntry[] => {
+    const member = membersById.get(r.memberId);
+    return member ? [{ ...r, member }] : [];
+  };
+  return { open: board.open.flatMap(attach), done: board.done.flatMap(attach), counts: board.counts };
 }

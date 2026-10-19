@@ -6,9 +6,10 @@ import { dashboardToday, getDashboardData, getHousePulse, getOfficerPanel } from
 import { deniedMessage, greeting, houseHour } from "@/lib/queries/dashboard-logic";
 import { getSetting, SETTING_KEYS } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
-import { AnnouncementsCard, DuesCard, EventsCard, MyTasksCard, MyWeekCard, NextMeetingCard, SanctionsCard } from "./_components/cards";
+import { AnnouncementsCard, ContactNotice, DuesCard, EventsCard, MyTasksCard, MyWeekCard, NextMeetingCard, SanctionsCard } from "./_components/cards";
 import { HousePulse } from "./_components/house-pulse";
 import { OfficerPanel } from "./_components/officer-panel";
+import { WaitingCard } from "./_components/waiting-card";
 
 export const metadata = { title: "Dashboard" };
 
@@ -34,8 +35,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </p>
       ) : null}
 
+      <ContactNotice memberId={user.id} missing={data.missingContact} />
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <MyWeekCard data={data} laborGroup={user.laborGroup} />
+        <WaitingCard items={data.waiting} className="md:col-span-2 xl:col-span-3" />
+        <MyWeekCard data={data} laborGroup={user.laborGroup} now={now} />
         <MyTasksCard data={data} now={now} />
         <DuesCard data={data} />
         <SanctionsCard data={data} />

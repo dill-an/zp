@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: { default: "ZP House", template: "%s | ZP House" },
   description: "Zeta Psi house management: roster, chairs and tasks, labor, dues, attendance and events.",
+  manifest: "/manifest.webmanifest",
 };
 
 export const viewport: Viewport = {

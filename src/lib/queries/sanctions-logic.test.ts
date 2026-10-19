@@ -13,13 +13,14 @@ import {
   sortSanctions,
   splitForMember,
   summarizeJobs,
+  type HouseBoardInput,
   type SanctionLike,
 } from "./sanctions-logic";
 
 const NOW = new Date("2026-10-18T16:00:00.000Z");
 
 let nextId = 1;
-function s(over: Partial<SanctionLike> = {}): SanctionLike {
+function s(over: Partial<HouseBoardInput> = {}): HouseBoardInput {
   return {
     id: nextId++,
     memberId: 1,
@@ -212,6 +213,59 @@ describe("summarizeJobs", () => {
   });
   it("returns an empty array for no sanctions", () => {
     expect(summarizeJobs([])).toEqual([]);
+  });
+});
+
+describe("semesterStart", () => {
+  it("is Jul 1 in the fall and Jan 1 in the spring", () => {
+    expect(semesterStart("2026-10-18")).toBe("2026-07-01");
+    expect(semesterStart("2026-07-01")).toBe("2026-07-01");
+    expect(semesterStart("2026-12-31")).toBe("2026-07-01");
+    expect(semesterStart("2027-01-01")).toBe("2027-01-01");
+    expect(semesterStart("2027-06-30")).toBe("2027-01-01");
+  });
+});
+
+describe("houseBoard", () => {
+  const list = [
+    s({ id: 1, status: "open", memberId: 1, memberName: "Gio Mandwee", jobDescription: "Deep clean kitchen", dueAt: "2026-10-25T03:00:00.000Z", notes: "Appeal (2026-10-17): I was away", fineCents: 2500 }),
+    s({ id: 2, status: "in_progress", memberId: 2, memberName: "Martin Meister", jobDescription: "Mop basement", dueAt: "2026-10-10T03:00:00.000Z", fineCents: null }), // overdue
+    s({ id: 3, status: "appealed", memberId: 1, jobDescription: null, reason: "Missed house meeting", hours: 1, dueAt: null }),
+    s({ id: 4, status: "completed", memberId: 3, memberName: "Ana", jobDescription: "Take out recycling", completedAt: "2026-10-16T20:00:00.000Z", updatedAt: "2026-10-16T20:00:00.000Z" }),
+    s({ id: 5, status: "verified", memberId: 2, memberName: "Martin Meister", jobDescription: "Deep clean kitchen", completedAt: "2026-09-01T20:00:00.000Z", verifiedAt: "2026-09-03T20:00:00.000Z" }),
+    s({ id: 6, status: "verified", memberId: 4, jobDescription: "Scrub the walk-in", verifiedAt: "2026-05-20T20:00:00.000Z" }), // last semester
+    s({ id: 7, status: "waived", memberId: 1, jobDescription: "Mop basement", fineCents: 1000 }),
+    s({ id: 8, status: "verified", memberId: 5, jobDescription: null, reason: "Loud after quiet hours", completedAt: null, verifiedAt: null, updatedAt: "2026-10-01T20:00:00.000Z" }),
+  ];
+  const board = houseBoard(list, NOW);
+
+  it("lists outstanding jobs soonest due first and this semester's done jobs newest first, without waived ones", () => {
+    expect(board.open.map((r) => r.id)).toEqual([2, 1, 3]);
+    expect(board.done.map((r) => r.id)).toEqual([4, 8, 5]);
+    expect(board.counts).toEqual({ open: 3, overdue: 1, brothersOpen: 2, doneThisSemester: 3 });
+  });
+
+  it("shows the job, or the reason when there is no job, and marks overdue work", () => {
+    expect(board.open[0]).toMatchObject({ id: 2, memberId: 2, memberName: "Martin Meister", job: "Mop basement", hasJob: true, status: "in_progress", overdue: true, doneAt: null });
+    expect(board.open[2]).toMatchObject({ id: 3, job: "Missed house meeting", hasJob: false, status: "appealed", overdue: false, dueAt: null });
+    expect(board.done[0]).toMatchObject({ id: 4, job: "Take out recycling", status: "completed", doneAt: "2026-10-16T20:00:00.000Z" });
+    expect(board.done[2]).toMatchObject({ id: 5, status: "verified", doneAt: "2026-09-03T20:00:00.000Z" });
+    // Verified without timestamps falls back to the last update.
+    expect(board.done[1]).toMatchObject({ id: 8, job: "Loud after quiet hours", doneAt: "2026-10-01T20:00:00.000Z" });
+  });
+
+  it("carries nothing the house should not see: no notes, appeal text, fine, hours or source", () => {
+    const keys = Object.keys(board.open[0]).sort();
+    expect(keys).toEqual(["doneAt", "dueAt", "hasJob", "id", "job", "memberId", "memberName", "overdue", "status"]);
+    const text = JSON.stringify(board);
+    expect(text).not.toContain("I was away");
+    expect(text).not.toContain("2500");
+    expect(text).not.toContain("notes");
+    expect(text).not.toContain("fineCents");
+  });
+
+  it("is empty for no sanctions", () => {
+    expect(houseBoard([], NOW)).toEqual({ open: [], done: [], counts: { open: 0, overdue: 0, brothersOpen: 0, doneThisSemester: 0 } });
   });
 });
 

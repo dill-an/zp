@@ -6,32 +6,34 @@ import { dueDescription, formatDate, formatDateTime } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { bodyParagraphs, relativeAge } from "@/lib/queries/community-logic";
 import type { DashboardData } from "@/lib/queries/dashboard";
+import { nextWeekMessage } from "@/lib/queries/dashboard-logic";
 import { statusLabel as duesStatusLabel } from "@/lib/queries/dues-logic";
-import { humanize } from "@/lib/utils";
+import { humanize, pluralize } from "@/lib/utils";
 import { CardEmpty, DashCard, SubHeading } from "./dash-card";
 import { JobRow } from "./job-row";
 import { TaskRow } from "./task-row";
 
 const SANCTION_LABELS: Record<string, string> = { open: "Open", in_progress: "In progress", appealed: "Appealed" };
 
-export function MyWeekCard({ data, laborGroup }: { data: DashboardData; laborGroup: string }) {
-  const { jobs, nextJobs, weekStart, nextWeekStart } = data;
+export function MyWeekCard({ data, laborGroup, now }: { data: DashboardData; laborGroup: string; now: Date }) {
+  const { jobs, nextJobs, nextWeek, weekStart, nextWeekStart } = data;
+  const inPool = laborGroup !== "none";
   return (
     <DashCard title="My week" count={jobs.length} href="/my-week" hrefLabel="Full week" testId="my-week-card">
-      {jobs.length === 0 && nextJobs.length === 0 ? (
-        <CardEmpty href="/labor" linkLabel="See the weekly grid">
-          {laborGroup === "none" ? "You are not in the labor pool, so no cleans are assigned to you." : `Nothing assigned to you for the week of ${formatDate(weekStart)}.`}
-        </CardEmpty>
+      {!inPool && jobs.length === 0 && nextJobs.length === 0 ? (
+        <CardEmpty href="/labor" linkLabel="See the weekly grid">You are not in the labor pool, so no cleans are assigned to you.</CardEmpty>
       ) : (
         <>
           {jobs.length ? (
             <ul className="divide-y divide-border" data-testid="my-week-jobs">
               {jobs.map((a) => (
-                <JobRow key={a.id} a={a} compact />
+                <JobRow key={a.id} a={a} compact now={now} />
               ))}
             </ul>
           ) : (
-            <CardEmpty>Nothing assigned to you this week.</CardEmpty>
+            <CardEmpty href="/labor" linkLabel="See the weekly grid">
+              Nothing assigned to you for the week of {formatDate(weekStart)}.
+            </CardEmpty>
           )}
           <SubHeading>Next week ({formatDate(nextWeekStart)})</SubHeading>
           {nextJobs.length ? (
@@ -46,7 +48,9 @@ export function MyWeekCard({ data, laborGroup }: { data: DashboardData; laborGro
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted">Nothing posted for next week yet.</p>
+            <p className="text-sm text-muted" data-testid="my-week-next-empty">
+              {nextWeekMessage(nextWeek, nextJobs.length)}
+            </p>
           )}
           <p className="mt-3 text-xs text-muted">
             Swaps and excuses live on{" "}
@@ -63,6 +67,7 @@ export function MyWeekCard({ data, laborGroup }: { data: DashboardData; laborGro
 
 export function MyTasksCard({ data, now }: { data: DashboardData; now: Date }) {
   const overdue = data.tasks.filter((t) => t.bucket === "overdue").length;
+  const board = data.boardTasks;
   return (
     <DashCard title="My tasks" count={data.tasks.length} href="/tasks?tab=mine" testId="my-tasks-card">
       {data.tasks.length === 0 ? (
@@ -74,7 +79,7 @@ export function MyTasksCard({ data, now }: { data: DashboardData; now: Date }) {
               {overdue} overdue
             </p>
           ) : null}
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-border" data-testid="my-tasks-list">
             {data.tasks.slice(0, 6).map((t) => (
               <TaskRow key={t.id} task={t} now={now} />
             ))}
@@ -86,7 +91,33 @@ export function MyTasksCard({ data, now }: { data: DashboardData; now: Date }) {
           ) : null}
         </>
       )}
+      {board.length ? (
+        <section data-testid="board-tasks" aria-label="Unassigned tasks on my boards">
+          <SubHeading>
+            On my boards, nobody assigned <Badge tone="warning">{board.length}</Badge>
+          </SubHeading>
+          <ul className="divide-y divide-border">
+            {board.slice(0, 5).map((t) => (
+              <TaskRow key={t.id} task={t} now={now} board />
+            ))}
+          </ul>
+          {board.length > 5 ? <p className="mt-1 text-xs text-muted">{pluralize(board.length - 5, "more unassigned task")} on your boards.</p> : null}
+        </section>
+      ) : null}
     </DashCard>
+  );
+}
+
+/** Nudge to fill in phone and email; officers rely on them. Hidden once both are set. */
+export function ContactNotice({ memberId, missing }: { memberId: number; missing: readonly string[] }) {
+  if (missing.length === 0) return null;
+  return (
+    <p className="mb-4 flex flex-wrap items-center gap-x-2 rounded-md border border-border bg-surface px-3 py-2 text-sm" data-testid="contact-notice">
+      <span>Add your phone and email so officers can reach you.</span>
+      <Link href={`/members/${memberId}/edit`} className="font-medium underline">
+        Edit profile
+      </Link>
+    </p>
   );
 }
 

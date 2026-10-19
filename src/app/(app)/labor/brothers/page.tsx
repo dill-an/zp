@@ -12,6 +12,7 @@ import { getBrothersWeeklyMatrix } from "@/lib/queries/labor";
 import { cn } from "@/lib/utils";
 import { JobChip } from "../_components/job-chip";
 import { LaborTabs } from "../_components/labor-tabs";
+import { ScrollToCurrentWeek } from "../_components/scroll-to-current-week";
 
 export const metadata = { title: "Brothers | Labor" };
 
@@ -94,15 +95,22 @@ type Matrix = ReturnType<typeof getBrothersWeeklyMatrix>;
 
 function GridView({ matrix, viewerId }: { matrix: Matrix; viewerId: number }) {
   return (
-    <div className="table-wrap rounded-lg border border-border bg-surface" data-testid="brothers-grid">
+    <ScrollToCurrentWeek className="table-wrap rounded-lg border border-border bg-surface" data-testid="brothers-grid">
       <table className="w-full border-collapse text-sm">
         <thead className="bg-surface-2 text-left text-xs uppercase tracking-wide text-muted">
           <tr>
-            <th className="sticky left-0 z-10 bg-surface-2 px-2 py-2 font-medium sm:px-3">Brother</th>
+            <th className="sticky left-0 z-10 bg-surface-2 px-2 py-2 font-medium sm:px-3" data-sticky-col>
+              Brother
+            </th>
             {matrix.weeks.map((w) => {
               const current = w.weekStart === matrix.currentWeekStart;
               return (
-                <th key={w.id} className={cn("min-w-28 px-2 py-2 font-medium", current && "bg-primary-soft text-primary-strong")} aria-current={current ? "date" : undefined}>
+                <th
+                  key={w.id}
+                  className={cn("min-w-28 px-2 py-2 font-medium", current && "bg-primary-soft text-primary-strong")}
+                  aria-current={current ? "date" : undefined}
+                  data-current-week={current ? "" : undefined}
+                >
                   <Link href={`/labor/week/${w.weekStart}`} className="hover:underline">
                     {formatShortDate(w.weekStart)}
                   </Link>
@@ -155,7 +163,7 @@ function GridView({ matrix, viewerId }: { matrix: Matrix; viewerId: number }) {
           })}
         </tbody>
       </table>
-    </div>
+    </ScrollToCurrentWeek>
   );
 }
 

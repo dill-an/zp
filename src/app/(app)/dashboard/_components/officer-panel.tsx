@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import type { OfficerPanel as OfficerPanelData } from "@/lib/queries/dashboard";
+import { laborWeekNotice } from "@/lib/queries/dashboard-logic";
 import { pluralize } from "@/lib/utils";
 
 function Line({ href, children, tone }: { href: string; children: React.ReactNode; tone?: "danger" | "warning" }) {
@@ -53,6 +54,14 @@ export function OfficerPanel({ panel }: { panel: OfficerPanelData }) {
 
         {panel.labor ? (
           <Panel title={`Labor · week of ${formatDate(panel.labor.weekStart)}`} href="/labor">
+            {(() => {
+              const notice = laborWeekNotice({ exists: panel.labor.hasWeek, isPublished: panel.labor.hasWeek && !panel.labor.isDraft }, panel.labor.weekStart);
+              return notice ? (
+                <Line href={notice.href} tone="warning">
+                  <span data-testid="labor-week-notice">{notice.text}</span>
+                </Line>
+              ) : null;
+            })()}
             {panel.labor.hasWeek ? (
               <>
                 <Line href="/labor?manage=1" tone={panel.labor.unfilled ? "warning" : undefined}>
@@ -62,11 +71,7 @@ export function OfficerPanel({ panel }: { panel: OfficerPanelData }) {
                   {pluralize(panel.labor.unverified, "done job")} to verify
                 </Line>
               </>
-            ) : (
-              <Line href="/labor" tone="warning">
-                No week posted yet
-              </Line>
-            )}
+            ) : null}
             <Line href="/labor/swaps">{pluralize(panel.labor.swaps, "swap request")} pending</Line>
             <Line href="/labor/excuses">{pluralize(panel.labor.excuses, "excuse request")} pending</Line>
           </Panel>

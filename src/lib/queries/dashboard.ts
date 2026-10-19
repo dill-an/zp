@@ -1,13 +1,15 @@
 import "server-only";
-import { and, desc, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLog, members, type AttendanceStatus, type AuditEntry, type ExcuseRequest, type Meeting } from "@/db/schema";
-import { todayISO } from "@/lib/dates";
+import { auditLog, members, taskAssignees, type AttendanceStatus, type AuditEntry, type ExcuseRequest, type Meeting } from "@/db/schema";
+import type { CalEvent } from "@/lib/calendar";
+import { addDaysISO, dateAtLocalTime, formatDate, todayISO, toHouseDate } from "@/lib/dates";
+import { displayName } from "@/lib/names";
 import { can, type CurrentUser } from "@/lib/permissions";
 import { listChairs } from "@/lib/queries/common";
-import { countOpenMaintenance, getActiveAnnouncements, getMyDuties, getUpcomingEvents, type AnnouncementRow, type EventListItem, type MyDuty } from "@/lib/queries/community";
+import { countOpenMaintenance, getActiveAnnouncements, getMemberCalendarEvents, getMyDuties, getUpcomingEvents, type AnnouncementRow, type EventListItem, type MyDuty } from "@/lib/queries/community";
 import { getActivePeriod, getMemberBalance, getPeriodStats, type MemberBalance, type PeriodStats } from "@/lib/queries/dues";
-import { getLaborContext, getLaborStats, getMemberWeekJobs, getPendingLaborCounts, getWeekGrid, type AssignmentDetail } from "@/lib/queries/labor";
+import { getLaborContext, getLaborStats, getMemberAssignments, getMemberWeekJobs, getPendingLaborCounts, getWeek, getWeekGrid, listExcuseRequests, listSwapRequests, type AssignmentDetail } from "@/lib/queries/labor";
 import { nextWeekStart } from "@/lib/queries/labor-logic";
 import {
   countPendingExcuses,
@@ -21,15 +23,106 @@ import {
   type MemberAttendanceSummary,
 } from "@/lib/queries/meetings";
 import { attendanceRate } from "@/lib/queries/meetings-logic";
-import { getOpenSanctionsForMember, getSanctionStats, type SanctionRow } from "@/lib/queries/sanctions";
+import { getOpenSanctionsForMember, getSanctionsForMember, getSanctionStats, type SanctionRow } from "@/lib/queries/sanctions";
 import type { SanctionStats } from "@/lib/queries/sanctions-logic";
-import { getTaskCountsByChair, getTasksForMember, type TaskListItem } from "@/lib/queries/tasks";
-import { AUDIT_PAGE_SIZE, completionPercent, dueBucket, inWeek, pageCount, weekSummary, type AuditParams, type DueBucket, type WeekSummary } from "./dashboard-logic";
+import { getTaskCountsByChair, getTasksForMember, listTasks, type TaskListItem } from "@/lib/queries/tasks";
+import { humanize } from "@/lib/utils";
+import {
+  AUDIT_PAGE_SIZE,
+  buildWaitingItems,
+  completionPercent,
+  dueBucket,
+  inWeek,
+  missingContactFields,
+  pageCount,
+  unassignedOnBoards,
+  WAITING_WINDOW_DAYS,
+  weekSummary,
+  withinLastDays,
+  type AuditParams,
+  type ContactField,
+  type DueBucket,
+  type WaitingItem,
+  type WeekStatus,
+  type WeekSummary,
+} from "./dashboard-logic";
 
 /*
- * Everything here combines the other modules' query exports; the only table read directly is
- * audit_log, which no module lists.
+ * Everything here combines the other modules' query exports. Two tables are read directly:
+ * audit_log, which no module lists, and task_assignees for the assignment timestamps that the
+ * tasks module does not expose.
  */
+
+/* ------------------------------------------------------------------ */
+/* Labor week status                                                   */
+/* ------------------------------------------------------------------ */
+
+/** Does the week row exist, and is it published? (Local stand-in for the labor module's getWeekStatus.) */
+export function getWeekStatus(weekStart: string): WeekStatus {
+  const week = getWeek(weekStart);
+  return { exists: !!week, isPublished: !!week?.isPublished };
+}
+
+/* ------------------------------------------------------------------ */
+/* Waiting on you                                                      */
+/* ------------------------------------------------------------------ */
+
+/** When each of a member's open tasks was assigned to them (task id -> assigned_at). */
+function recentTaskAssignments(memberId: number, now: Date): Map<number, string> {
+  const since = new Date(now.getTime() - WAITING_WINDOW_DAYS * 86_400_000).toISOString();
+  const rows = db
+    .select({ taskId: taskAssignees.taskId, assignedAt: taskAssignees.assignedAt })
+    .from(taskAssignees)
+    .where(and(eq(taskAssignees.memberId, memberId), gte(taskAssignees.assignedAt, since)))
+    .all();
+  return new Map(rows.map((r) => [r.taskId, r.assignedAt]));
+}
+
+/**
+ * Requests waiting on the brother, things that just landed on them and decisions about their own
+ * requests from the last week. Empty for a quiet week.
+ */
+export function getWaitingOnYou(user: CurrentUser, opts: { now?: Date; tasks?: TaskListItem[]; dutiesThisWeek?: MyDuty[]; weekStart?: string } = {}): WaitingItem[] {
+  const now = opts.now ?? new Date();
+  const weekStart = opts.weekStart ?? getLaborContext().currentWeekStart;
+  const assignedAt = recentTaskAssignments(user.id, now);
+  const openTasks = opts.tasks ?? getTasksForMember(user.id, { openOnly: true });
+  const duties = opts.dutiesThisWeek ?? getMyDuties(user.id).filter((d) => inWeek(d.startsAt ?? d.event.startsAt, weekStart));
+  return buildWaitingItems(
+    {
+      memberId: user.id,
+      inLaborPool: user.laborGroup !== "none",
+      swaps: listSwapRequests().map((r) => ({
+        id: r.id,
+        status: r.status,
+        requestedById: r.requestedById,
+        targetMemberId: r.targetMemberId,
+        resolvedAt: r.resolvedAt,
+        createdAt: r.createdAt,
+        jobName: r.assignment.jobType.name,
+        weekStart: r.assignment.weekStart,
+        requesterName: displayName(r.requestedBy),
+        jobOpen: r.assignment.status === "assigned",
+      })),
+      excuses: listExcuseRequests({ memberId: user.id, status: ["approved", "denied"] }).map((e) => ({
+        id: e.id,
+        status: e.status,
+        reviewedAt: e.reviewedAt,
+        jobName: e.assignment.jobType.name,
+        weekStart: e.assignment.weekStart,
+      })),
+      sanctions: getSanctionsForMember(user.id, now)
+        .filter((s) => withinLastDays(s.issuedAt, now))
+        .map((s) => ({ id: s.id, reason: s.reason, status: s.status, issuedAt: s.issuedAt, dueAt: s.dueAt })),
+      tasks: openTasks.flatMap((t) => {
+        const at = assignedAt.get(t.id);
+        return at ? [{ id: t.id, title: t.title, assignedAt: at, dueAt: t.dueAt }] : [];
+      }),
+      duties: duties.map((d) => ({ id: d.id, eventId: d.event.id, eventTitle: d.event.title, duty: d.duty, label: d.label, startsAt: d.startsAt ?? d.event.startsAt })),
+    },
+    now,
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* My week                                                             */
@@ -50,6 +143,8 @@ export type MyWeek = {
   today: string;
   weekStart: string;
   nextWeekStart: string;
+  /** Whether next week's schedule exists and is published (decides the empty-state wording). */
+  nextWeek: WeekStatus;
   jobs: AssignmentDetail[];
   nextJobs: AssignmentDetail[];
   /** Open tasks assigned to me, overdue first. */
@@ -60,6 +155,8 @@ export type MyWeek = {
   sanctions: SanctionRow[];
   meetings: MeetingThisWeek[];
   summary: WeekSummary;
+  /** Requests and news that need a look; empty when nothing is waiting. */
+  waiting: WaitingItem[];
 };
 
 /** What is on a brother's plate this week, pulled from every module. */
@@ -69,7 +166,9 @@ export function getMyWeek(user: CurrentUser, now: Date = new Date()): MyWeek {
   const next = nextWeekStart(weekStart);
   const jobs = getMemberWeekJobs(user.id, weekStart);
   const nextJobs = getMemberWeekJobs(user.id, next);
-  const tasks = getTasksForMember(user.id, { openOnly: true }).map((t) => ({ ...t, bucket: dueBucket(t.dueAt, weekStart, now) }));
+  const nextWeek = getWeekStatus(next);
+  const openTasks = getTasksForMember(user.id, { openOnly: true });
+  const tasks = openTasks.map((t) => ({ ...t, bucket: dueBucket(t.dueAt, weekStart, now) }));
   const duties = getMyDuties(user.id);
   const dutiesThisWeek = duties.filter((d) => inWeek(d.startsAt ?? d.event.startsAt, weekStart));
   const sanctions = getOpenSanctionsForMember(user.id, now);
@@ -95,7 +194,9 @@ export function getMyWeek(user: CurrentUser, now: Date = new Date()): MyWeek {
     meetings: meetings.map((m) => ({ attended: m.attendance === "present" || m.attendance === "late" })),
   });
 
-  return { today: ctx.today, weekStart, nextWeekStart: next, jobs, nextJobs, tasks, duties, dutiesThisWeek, sanctions, meetings, summary };
+  const waiting = getWaitingOnYou(user, { now, tasks: openTasks, dutiesThisWeek, weekStart });
+
+  return { today: ctx.today, weekStart, nextWeekStart: next, nextWeek, jobs, nextJobs, tasks, duties, dutiesThisWeek, sanctions, meetings, summary, waiting };
 }
 
 /* ------------------------------------------------------------------ */
@@ -108,7 +209,17 @@ export type DashboardData = MyWeek & {
   attendance: MemberAttendanceSummary;
   events: EventListItem[];
   announcements: AnnouncementRow[];
+  /** Open tasks nobody has picked up on the boards of chairs I hold. */
+  boardTasks: TaskWithBucket[];
+  /** Contact details the member has not filled in yet. */
+  missingContact: ContactField[];
 };
+
+/** Open, unassigned tasks on the given chairs' boards. (Local stand-in for the tasks module's getUnassignedBoardTasks.) */
+export function getUnassignedBoardTasks(chairIds: number[], now: Date = new Date()): TaskListItem[] {
+  if (chairIds.length === 0) return [];
+  return unassignedOnBoards(listTasks({ status: "open" }, now), chairIds);
+}
 
 export function getDashboardData(user: CurrentUser, now: Date = new Date()): DashboardData {
   const week = getMyWeek(user, now);
@@ -120,6 +231,8 @@ export function getDashboardData(user: CurrentUser, now: Date = new Date()): Das
     attendance: getAttendanceSummary(user.id),
     events: getUpcomingEvents(5, user.id),
     announcements: getActiveAnnouncements(user, 3),
+    boardTasks: getUnassignedBoardTasks(user.chairIds, now).map((t) => ({ ...t, bucket: dueBucket(t.dueAt, week.weekStart, now) })),
+    missingContact: missingContactFields(user),
   };
 }
 
@@ -131,7 +244,7 @@ export type OfficerChairCard = { id: number; slug: string; name: string; open: n
 
 export type OfficerPanel = {
   chairs: OfficerChairCard[];
-  labor: { weekStart: string; hasWeek: boolean; unfilled: number; unverified: number; swaps: number; excuses: number } | null;
+  labor: { weekStart: string; hasWeek: boolean; isDraft: boolean; unfilled: number; unverified: number; swaps: number; excuses: number } | null;
   dues: { periodName: string | null; stats: PeriodStats } | null;
   meetings: { needsAttendance: MeetingListItem[]; next: Meeting | null; pendingExcuses: number } | null;
   maintenance: { open: number } | null;
@@ -157,6 +270,7 @@ export function getOfficerPanel(user: CurrentUser, now: Date = new Date()): Offi
     labor = {
       weekStart: ctx.currentWeekStart,
       hasWeek: !!grid,
+      isDraft: !!grid && !grid.week.isPublished,
       unfilled: grid ? Math.max(0, grid.counts.slots - grid.counts.filled) : 0,
       unverified: grid ? grid.assignments.filter((a) => a.status === "done" && !a.verifiedAt).length : 0,
       swaps: pending.swaps,
@@ -209,6 +323,95 @@ export function getHousePulse(): HousePulse {
   const poolIds = new Set(stats.pool.map((m) => m.id));
   const zeroCleans = stats.belowThreshold(1).filter((s) => poolIds.has(s.memberId)).length;
   return { labor, lastMeeting, openMaintenance: countOpenMaintenance(), zeroCleans, poolSize: stats.pool.length };
+}
+
+/* ------------------------------------------------------------------ */
+/* Calendar feed                                                       */
+/* ------------------------------------------------------------------ */
+
+export const CALENDAR_WEEKS_BACK = 4;
+export const CALENDAR_WEEKS_AHEAD = 12;
+
+const JOB_PREFIX: Record<string, string> = { clean: "Clean", cook: "Cook", duty: "Duty" };
+
+/**
+ * Everything a brother would want on their phone's calendar: labor jobs (all-day on the due date),
+ * events they are going to and their duties there, house and mandatory meetings, and open sanction
+ * deadlines, from four weeks back to twelve weeks ahead.
+ */
+export function getCalendarFeed(memberId: number, opts: { now?: Date; baseUrl?: string } = {}): CalEvent[] {
+  const now = opts.now ?? new Date();
+  const base = opts.baseUrl ?? "";
+  const today = todayISO(now);
+  const fromDate = addDaysISO(today, -7 * CALENDAR_WEEKS_BACK);
+  const toDate = addDaysISO(today, 7 * CALENDAR_WEEKS_AHEAD);
+  const fromIso = dateAtLocalTime(fromDate, "00:00");
+  const toIso = dateAtLocalTime(addDaysISO(toDate, 1), "00:00");
+  const inRange = (iso: string) => iso >= fromIso && iso < toIso;
+  const out: CalEvent[] = [];
+
+  for (const a of getMemberAssignments(memberId)) {
+    if (a.status === "swapped" || a.dueDate < fromDate || a.dueDate > toDate) continue;
+    const window = a.jobType.windowLabel ? `Window: ${a.jobType.windowLabel}. ` : "";
+    const state = a.status === "assigned" ? "" : `Status: ${humanize(a.status)}. `;
+    out.push({
+      uid: `job-${a.id}`,
+      summary: `${JOB_PREFIX[a.jobType.kind] ?? "Job"}: ${a.jobType.name}`,
+      date: a.dueDate,
+      description: `${window}${state}Week of ${formatDate(a.weekStart, { year: true })}.${a.jobType.instructions ? ` ${a.jobType.instructions}` : ""}`,
+      url: `${base}/labor/week/${a.weekStart}`,
+    });
+  }
+
+  for (const { event, rsvp, duties } of getMemberCalendarEvents(memberId, fromIso, toIso)) {
+    if (rsvp === "going") {
+      out.push({
+        uid: `event-${event.id}`,
+        summary: event.title,
+        start: event.startsAt,
+        end: event.endsAt,
+        location: event.location,
+        description: `${humanize(event.kind)} event${event.isMandatory ? ", attendance is mandatory" : ""}.${event.description ? ` ${event.description}` : ""}`,
+        url: `${base}/events/${event.id}`,
+      });
+    }
+    for (const d of duties) {
+      out.push({
+        uid: `duty-${d.id}`,
+        summary: `${d.label ?? humanize(d.duty)}: ${event.title}`,
+        start: d.startsAt ?? event.startsAt,
+        end: d.endsAt ?? (d.startsAt ? null : event.endsAt),
+        location: event.location,
+        description: `Your ${humanize(d.duty).toLowerCase()} duty at ${event.title}.${d.notes ? ` ${d.notes}` : ""}`,
+        url: `${base}/events/${event.id}`,
+      });
+    }
+  }
+
+  for (const m of [...listMeetings({ scope: "past" }), ...listMeetings({ scope: "upcoming" })]) {
+    if (!(m.kind === "house" || m.isMandatory) || !inRange(m.scheduledAt)) continue;
+    out.push({
+      uid: `meeting-${m.id}`,
+      summary: m.title,
+      start: m.scheduledAt,
+      location: m.location,
+      description: `${humanize(m.kind)} meeting${m.isMandatory ? ", attendance is mandatory" : ""}.${m.agenda ? ` Agenda: ${m.agenda}` : ""}`,
+      url: `${base}/meetings/${m.id}`,
+    });
+  }
+
+  for (const s of getOpenSanctionsForMember(memberId, now)) {
+    if (!s.dueAt || !inRange(s.dueAt)) continue;
+    out.push({
+      uid: `sanction-${s.id}`,
+      summary: `Sanction due: ${s.reason}`,
+      date: toHouseDate(s.dueAt),
+      description: `${s.jobDescription ? `${s.jobDescription}. ` : ""}Status: ${humanize(s.status)}.`,
+      url: `${base}/sanctions/${s.id}`,
+    });
+  }
+
+  return out;
 }
 
 /* ------------------------------------------------------------------ */

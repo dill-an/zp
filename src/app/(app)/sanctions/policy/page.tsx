@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { getSetting } from "@/lib/settings";
+import { getSetting, SETTING_KEYS } from "@/lib/settings";
 import { policyParagraphs, SANCTIONS_POLICY_KEY } from "@/lib/queries/sanctions-logic";
 import { buttonClasses } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { BoardVisibilityForm } from "../_components/board-visibility-form";
 import { PolicyForm } from "../_components/policy-form";
 
 export const metadata = { title: "Standards policy" };
@@ -15,6 +16,7 @@ export default async function PolicyPage() {
   const manager = can(user, "sanctions.manage");
   const text = getSetting(SANCTIONS_POLICY_KEY);
   const paragraphs = policyParagraphs(text);
+  const boardPublic = getSetting(SETTING_KEYS.sanctionsBoardPublic) === "1";
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -50,6 +52,20 @@ export default async function PolicyPage() {
           </CardHeader>
           <CardContent>
             <PolicyForm current={text} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {manager ? (
+        <Card className="mt-6" data-testid="board-visibility-card">
+          <CardHeader>
+            <div>
+              <CardTitle>House board</CardTitle>
+              <CardDescription>{boardPublic ? "Every brother can open the House board tab on Sanctions." : "Only standards can see the board right now."}</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <BoardVisibilityForm current={boardPublic} />
           </CardContent>
         </Card>
       ) : null}

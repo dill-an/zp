@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "zp_session";
-const PUBLIC_PATHS = ["/login", "/api/health"];
+// /api/calendar is a per-member iCal feed; calendar apps poll it without a session (the token is the credential).
+const PUBLIC_PATHS = ["/login", "/api/health", "/api/calendar"];
 
 /**
  * Cheap gate: redirect to /login when no session cookie exists.

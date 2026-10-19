@@ -7,8 +7,9 @@ import { requireUser } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
 import { displayName } from "@/lib/names";
 import { getLaborContext, getLaborPool, getMemberAssignments, getMemberLaborStats, getOpenRequestsFor, type AssignmentDetail } from "@/lib/queries/labor";
-import { nextWeekStart } from "@/lib/queries/labor-logic";
+import { myJobsText, nextWeekStart } from "@/lib/queries/labor-logic";
 import { AssignmentCard } from "../_components/assignment-card";
+import { CopyTextButton } from "../_components/copy-text-button";
 import { LaborTabs } from "../_components/labor-tabs";
 
 export const metadata = { title: "My jobs | Labor" };
@@ -54,9 +55,25 @@ export default async function MyLaborPage() {
   const mySwaps = requests.swaps.filter((r) => r.requestedById === user.id);
   const forMe = requests.swaps.filter((r) => r.targetMemberId === user.id && r.requestedById !== user.id && r.status === "pending");
 
+  // Plain-text version of my open jobs (missed and excused ones are not mine to do) for the group chat.
+  const textJobs = (items: AssignmentDetail[]) =>
+    items.filter((a) => a.status === "assigned" || a.status === "done").map((a) => ({ name: a.jobType.name, windowLabel: a.jobType.windowLabel, dueDate: a.dueDate }));
+  const text = myJobsText({
+    title: `${displayName(user)}: my jobs`,
+    sections: [
+      { label: `This week (${formatDate(ctx.currentWeekStart)})`, jobs: textJobs(thisWeek) },
+      { label: `Next week (${formatDate(next)})`, jobs: textJobs(nextWeek) },
+      ...(later.length ? [{ label: "Later", jobs: textJobs(later) }] : []),
+    ],
+  });
+
   return (
     <>
-      <PageHeader title="My jobs" description={`${displayName(user)} · ${user.laborGroup === "none" ? "not in the labor pool" : `${user.laborGroup} group`} · week of ${formatDate(ctx.currentWeekStart)}`} />
+      <PageHeader
+        title="My jobs"
+        description={`${displayName(user)} · ${user.laborGroup === "none" ? "not in the labor pool" : `${user.laborGroup} group`} · week of ${formatDate(ctx.currentWeekStart)}`}
+        actions={thisWeek.length || nextWeek.length || later.length ? <CopyTextButton text={text} /> : undefined}
+      />
       <LaborTabs user={user} active="/labor/me" />
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
         <Stat label="Assigned" value={stats.assigned} hint="this semester" />

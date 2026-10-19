@@ -4,8 +4,9 @@ import { can, type CurrentUser } from "@/lib/permissions";
 import { SANCTION_SOURCES } from "@/db/schema";
 import { formatCents } from "@/lib/money";
 import { groupByPledgeClass, listMembers } from "@/lib/queries/common";
-import { getSanctionStats, getSanctionsForMember, listSanctions } from "@/lib/queries/sanctions";
+import { getHouseBoard, getSanctionStats, getSanctionsForMember, listSanctions } from "@/lib/queries/sanctions";
 import { filterSanctions, isSanctionTab, SANCTION_TABS, splitForMember, summarizeJobs, TAB_LABELS, type SanctionTab } from "@/lib/queries/sanctions-logic";
+import { getSetting, SETTING_KEYS } from "@/lib/settings";
 import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LinkTabs } from "@/components/ui/link-tabs";
@@ -13,6 +14,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Stat } from "@/components/ui/stat";
 import { BoardFilters } from "./_components/board-filters";
 import { BoardTable } from "./_components/board-table";
+import { HouseBoard } from "./_components/house-board";
 import { JobsSummary } from "./_components/jobs-summary";
 import { MySanctionCard } from "./_components/my-sanction-card";
 
@@ -29,22 +31,35 @@ export default async function SanctionsPage({ searchParams }: { searchParams: Pr
   const sp = await searchParams;
   const manager = can(user, "sanctions.manage");
   if (manager && first(sp.mine) !== "1") return <Board sp={sp} />;
-  return <MySanctions user={user} manager={manager} />;
+  // The house board is a setting standards can turn off; when off, ?board=1 just shows the brother's own list.
+  const boardPublic = getSetting(SETTING_KEYS.sanctionsBoardPublic) === "1";
+  const view = boardPublic && first(sp.board) === "1" ? "board" : "mine";
+  return <BrotherView user={user} manager={manager} boardPublic={boardPublic} view={view} />;
 }
 
 /* ------------------------------------------------------------------ */
-/* Brother view                                                        */
+/* Brother view: "My sanctions" and, when allowed, the "House board"   */
 /* ------------------------------------------------------------------ */
 
-async function MySanctions({ user, manager }: { user: CurrentUser; manager: boolean }) {
-  const now = new Date();
-  const all = getSanctionsForMember(user.id, now);
-  const { active, awaiting, history } = splitForMember(all);
+async function BrotherView({ user, manager, boardPublic, view }: { user: CurrentUser; manager: boolean; boardPublic: boolean; view: "mine" | "board" }) {
+  // A manager reaches this view through ?mine=1, so the tabs keep that flag.
+  const mineHref = manager ? "/sanctions?mine=1" : "/sanctions";
+  const boardHref = manager ? "/sanctions?mine=1&board=1" : "/sanctions?board=1";
+  const tabs = boardPublic
+    ? [
+        { href: mineHref, label: "My sanctions" },
+        { href: boardHref, label: "House board" },
+      ]
+    : [];
   return (
     <>
       <PageHeader
-        title="My sanctions"
-        description="Punishment jobs, work hours and fines assigned to you. Start a job, mark it done, or appeal it."
+        title={view === "board" ? "House board" : "My sanctions"}
+        description={
+          view === "board"
+            ? "Punishment jobs across the house: who still needs to do one, by when, and what has been done this semester."
+            : "Punishment jobs, work hours and fines assigned to you. Start a job, mark it done, or appeal it."
+        }
         actions={
           <>
             {manager ? (
@@ -58,7 +73,23 @@ async function MySanctions({ user, manager }: { user: CurrentUser; manager: bool
           </>
         }
       />
+      {tabs.length > 0 ? <LinkTabs tabs={tabs} active={view === "board" ? boardHref : mineHref} /> : null}
+      {view === "board" ? <HouseBoardView /> : <MySanctions user={user} />}
+    </>
+  );
+}
 
+function HouseBoardView() {
+  const board = getHouseBoard(new Date());
+  return <HouseBoard open={board.open} done={board.done} counts={board.counts} />;
+}
+
+function MySanctions({ user }: { user: CurrentUser }) {
+  const now = new Date();
+  const all = getSanctionsForMember(user.id, now);
+  const { active, awaiting, history } = splitForMember(all);
+  return (
+    <>
       {all.length === 0 ? (
         <EmptyState title="No sanctions" description="You have nothing outstanding. Keep it that way." />
       ) : (

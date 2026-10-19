@@ -1,5 +1,31 @@
 import { test, expect, type Page } from "@playwright/test";
-import { ADMIN, BROTHER, CLEANER, login, logout, uniq } from "./helpers";
+import { ADMIN, BROTHER, CLEANER, logout, uniq } from "./helpers";
+
+// Dev servers shared with other agents compile slowly and reload on their saves; give each test room.
+test.setTimeout(240_000);
+
+/**
+ * Logs in with bounded waits and a few retries instead of the shared helper: on a dev server shared with
+ * other agents, a Fast Refresh reload from their saves can wipe the form before submit, and one lost
+ * submit should cost seconds rather than the whole test budget.
+ */
+async function login(page: Page, user: { username: string; password: string } = ADMIN) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      await page.goto("/login", { waitUntil: "commit" });
+      if (/\/dashboard/.test(page.url())) return; // an earlier submit did land
+      await page.fill("#username", user.username, { timeout: 15_000 });
+      await page.fill("#password", user.password, { timeout: 15_000 });
+      await page.click("form button[type=submit]", { timeout: 15_000 });
+      await page.waitForURL(/\/dashboard/, { waitUntil: "commit", timeout: 30_000 });
+      return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
 
 /** The assignee checkbox for a brother, matched by display name on its label. */
 function assigneeBox(page: Page, name: string) {

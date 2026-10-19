@@ -7,10 +7,13 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { createWeek } from "@/lib/actions/labor";
 import { addDaysISO, formatDate } from "@/lib/dates";
+import { shortName } from "@/lib/names";
 import { can, type CurrentUser } from "@/lib/permissions";
 import { groupByPledgeClass } from "@/lib/queries/common";
 import { getLaborContext, getLaborPool, getPreviousWeek, getWeekGrid, listWeeks } from "@/lib/queries/labor";
+import { scheduleText } from "@/lib/queries/labor-logic";
 import { ActionForm } from "./action-form";
+import { CopyTextButton } from "./copy-text-button";
 import { LaborTabs } from "./labor-tabs";
 import { WeekGrid } from "./week-grid";
 import { WeekManageBar } from "./week-manage";
@@ -26,9 +29,26 @@ export function WeekPage({ user, weekStart, manage }: { user: CurrentUser; weekS
   const isCurrent = weekStart === ctx.currentWeekStart;
   const rangeLabel = `${formatDate(weekStart, { weekday: true })} to ${formatDate(addDaysISO(weekStart, 6), { weekday: true })}`;
   const visible = grid && (grid.week.isPublished || canManage);
+  // Plain-text copy of the schedule for the group chat; only once there is something to paste.
+  const text =
+    visible && grid.assignments.length
+      ? scheduleText({
+          weekStart,
+          groups: grid.groups.map((g) => ({
+            label: g.label,
+            rows: g.rows.map((r) => ({
+              name: r.jobType.name,
+              windowLabel: r.jobType.windowLabel,
+              names: r.slots.map((s) => (s.assignment ? shortName(s.assignment.member) : null)),
+            })),
+          })),
+          notes: grid.week.notes,
+        })
+      : null;
 
   const headerActions = (
     <>
+      {text ? <CopyTextButton text={text} /> : null}
       {canManage && grid ? (
         manageMode ? null : (
           <ButtonLink href={`/labor/week/${weekStart}?manage=1`} size="sm">

@@ -3,13 +3,14 @@ import { requireUser } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { getMyWeek } from "@/lib/queries/dashboard";
-import { weekEnd } from "@/lib/queries/dashboard-logic";
+import { nextWeekMessage, weekEnd } from "@/lib/queries/dashboard-logic";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status-pill";
 import { humanize } from "@/lib/utils";
 import { CardEmpty, DashCard } from "../dashboard/_components/dash-card";
 import { JobRow } from "../dashboard/_components/job-row";
 import { TaskRow } from "../dashboard/_components/task-row";
+import { WaitingCard } from "../dashboard/_components/waiting-card";
 
 export const metadata = { title: "My week" };
 
@@ -36,6 +37,7 @@ export default async function MyWeekPage() {
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
+        <WaitingCard items={week.waiting} className="lg:col-span-2" />
         <DashCard title="Labor jobs" count={week.jobs.length} href="/labor/me" hrefLabel="My jobs" testId="week-jobs" className="lg:col-span-2">
           {week.jobs.length === 0 ? (
             <CardEmpty href="/labor" linkLabel="See the weekly grid">
@@ -44,7 +46,7 @@ export default async function MyWeekPage() {
           ) : (
             <ul className="divide-y divide-border">
               {week.jobs.map((a) => (
-                <JobRow key={a.id} a={a} />
+                <JobRow key={a.id} a={a} now={now} />
               ))}
             </ul>
           )}
@@ -169,11 +171,13 @@ export default async function MyWeekPage() {
 
         <DashCard title={`Next week · ${formatDate(week.nextWeekStart)}`} count={week.nextJobs.length} href={`/labor/week/${week.nextWeekStart}`} hrefLabel="Grid" testId="week-next" className="lg:col-span-2">
           {week.nextJobs.length === 0 ? (
-            <CardEmpty>Nothing posted for next week yet.</CardEmpty>
+            <CardEmpty href={week.nextWeek.exists && week.nextWeek.isPublished ? `/labor/week/${week.nextWeekStart}` : undefined} linkLabel="See the grid">
+              {nextWeekMessage(week.nextWeek, 0)}
+            </CardEmpty>
           ) : (
             <ul className="divide-y divide-border">
               {week.nextJobs.map((a) => (
-                <JobRow key={a.id} a={a} compact />
+                <JobRow key={a.id} a={a} compact now={now} />
               ))}
             </ul>
           )}
