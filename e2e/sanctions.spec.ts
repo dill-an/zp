@@ -206,7 +206,10 @@ async function setBoardVisible(page: Page, visible: boolean) {
   if (visible) await toggle.check();
   else await toggle.uncheck();
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.locator("[data-testid=board-visibility-card] p[role=status]")).toHaveText(visible ? "Every brother can now open the house board." : "The house board is hidden from brothers.");
+  const card = page.getByTestId("board-visibility-card");
+  await expect(card.locator("p[role=status]")).toHaveText(visible ? "Every brother can now open the house board." : "The house board is hidden from brothers.");
+  // The server-rendered description follows the saved setting.
+  await expect(card).toContainText(visible ? "Every brother can open the House board tab" : "Only standards can see the board right now.");
 }
 
 test("every brother can read the house board, and standards can switch it off", async ({ page }) => {
