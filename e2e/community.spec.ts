@@ -492,14 +492,16 @@ test("an RSVP and a duty show up in the brother's calendar feed", async ({ brows
 
   await brother.page.goto(eventUrl);
   await brother.page.getByRole("button", { name: "Going", exact: true }).click();
-  await expect(brother.page.getByText("You: going")).toBeVisible();
+  await expect(brother.page.getByText("You: going")).toBeVisible({ timeout: 30_000 });
 
+  await admin.page.goto(eventUrl);
   await admin.page.getByRole("button", { name: "Add duty" }).click();
   await admin.page.selectOption("#dutyMemberId", { label: BROTHER.name });
   await admin.page.selectOption("#duty", "door");
   await admin.page.fill("#label", "Front door");
   await admin.page.getByRole("button", { name: "Save duty" }).click();
-  await expect(admin.page.getByText("Duty added.")).toBeVisible();
+  // A dev server may still be compiling the action; give it room.
+  await expect(admin.page.getByText("Duty added.")).toBeVisible({ timeout: 30_000 });
 
   // The feed link lives on /settings; the feed itself needs no session.
   await brother.page.goto("/settings");
@@ -518,7 +520,7 @@ test("an RSVP and a duty show up in the brother's calendar feed", async ({ brows
   // Changing the RSVP to not going drops the event but keeps the duty.
   await brother.page.goto(eventUrl);
   await brother.page.getByRole("button", { name: "Not going", exact: true }).click();
-  await expect(brother.page.getByText("You: not going")).toBeVisible();
+  await expect(brother.page.getByText("You: not going")).toBeVisible({ timeout: 30_000 });
   const again = await playwrightRequest.newContext();
   const after = ((await (await again.get(url)).text()) ?? "").replace(/\r\n[ \t]/g, "");
   expect(after).not.toContain(`SUMMARY:${title}\r\n`);

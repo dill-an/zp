@@ -26,6 +26,24 @@ async function noHorizontalOverflow(page: Page) {
   expect(overflows).toBe(false);
 }
 
+/**
+ * A dev server restarts itself when it nears its heap limit and a navigation caught in that window
+ * never answers; retrying a couple of times keeps that from sinking a whole serial suite.
+ */
+async function goto(page: Page, path: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.goto(path, { timeout: 45_000 });
+      return;
+    } catch (err) {
+      lastError = err;
+      await page.waitForTimeout(3_000);
+    }
+  }
+  throw lastError;
+}
+
 const HOUSE_TZ = "America/New_York";
 
 /** Today's calendar date in the house timezone. */
@@ -54,7 +72,7 @@ function unfold(ics: string): string {
 
 /** The brother's calendar feed URL as shown on /settings. */
 async function feedUrl(page: Page): Promise<string> {
-  await page.goto("/settings");
+  await goto(page, "/settings");
   await expect(page.getByTestId("calendar-card")).toBeVisible();
   const url = await page.locator("#calendar-https").inputValue();
   expect(url).toMatch(/^https?:\/\/.+\/api\/calendar\/[0-9a-f]{32}$/);
@@ -79,13 +97,13 @@ test("admin dashboard shows the officer panel and house pulse, then assigns Mart
   }
 
   // Make sure the current labor week exists, then give Martin a job in it.
-  await page.goto("/labor");
+  await goto(page, "/labor");
   const copy = page.getByRole("button", { name: "Copy last week" });
   if (await copy.isVisible()) {
     await copy.click();
     await expect(copy).toBeHidden();
   }
-  await page.goto("/labor?manage=1");
+  await goto(page, "/labor?manage=1");
   await expect(page.getByText("Manage this week")).toBeVisible();
   const row = page.locator(`tr[data-job="${JOB}"]`);
   await expect(row).toBeVisible();
@@ -139,14 +157,14 @@ test("a brother's dashboard shows My week with the assignment, dues and next mee
     await expect(notice.getByRole("link", { name: "Edit profile" })).toHaveAttribute("href", /^\/members\/\d+\/edit$/);
   } else {
     // Another run filled them in: the notice only goes away once both are set.
-    await page.goto("/settings");
+    await goto(page, "/settings");
     await page.getByTestId("profile-card").getByRole("link", { name: "Edit profile" }).click();
     await expect(page.locator("#phone")).not.toHaveValue("");
     await expect(page.locator("#email")).not.toHaveValue("");
   }
 
   // My week: the same job, header counts.
-  await page.goto("/my-week");
+  await goto(page, "/my-week");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("My week");
   await expect(page.getByTestId("week-summary")).toContainText(/\d+ things? this week, \d+ done/);
   const weekJob = page.getByTestId("week-jobs").locator(`li[data-job="${JOB}"]`);
@@ -163,7 +181,7 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
 
   await login(page, ADMIN);
   // A task assigned to Gio right now.
-  await page.goto("/tasks/new");
+  await goto(page, "/tasks/new");
   await page.fill("#title", taskTitle);
   await page.getByLabel(BROTHER.name).check();
   await page.getByRole("button", { name: "Create task" }).click();
@@ -171,7 +189,7 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
   const taskHref = new URL(page.url()).pathname;
 
   // An event later today (so it sits inside the current labor week) with a duty for Gio.
-  await page.goto("/events/new");
+  await goto(page, "/events/new");
   await page.fill("#title", eventTitle);
   await page.fill("#startsAt", `${today}T23:30`);
   await page.fill("#endsAt", `${shiftDate(today, 1)}T03:00`);
@@ -198,14 +216,14 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
   await expect(dutyRow.getByRole("link")).toHaveAttribute("href", eventHref);
 
   // The same card opens My week.
-  await page.goto("/my-week");
+  await goto(page, "/my-week");
   await expect(page.getByTestId("waiting-card").locator("li[data-waiting-kind=task]").filter({ hasText: taskTitle })).toBeVisible();
   await expect(page.getByTestId("waiting-card").locator("li[data-waiting-kind=duty]").filter({ hasText: eventTitle })).toBeVisible();
 
   // Tidy up the event so the duty does not linger for other runs.
   await page.context().clearCookies();
   await login(page, ADMIN);
-  await page.goto(eventHref);
+  await goto(page, eventHref);
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Delete" }).click();
   await page.waitForURL(/\/events$/);
@@ -214,13 +232,13 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
 test("a published next week with no job for the brother reads 'No jobs for you next week'", async ({ page }) => {
   const next = nextWeekSunday();
   await login(page, ADMIN);
-  await page.goto(`/labor/week/${next}`);
+  await goto(page, `/labor/week/${next}`);
   const create = page.getByRole("button", { name: "Create empty week" });
   if (await create.isVisible()) {
     await create.click();
     await page.waitForURL(new RegExp(`/labor/week/${next}\\?manage=1`));
   }
-  await page.goto(`/labor/week/${next}?manage=1`);
+  await goto(page, `/labor/week/${next}?manage=1`);
   const publish = page.getByRole("button", { name: "Publish", exact: true });
   if (await publish.count()) {
     await publish.click();
@@ -241,7 +259,7 @@ test("a published next week with no job for the brother reads 'No jobs for you n
   }
   await expect(card).not.toContainText("Nothing posted for next week yet");
 
-  await page.goto("/my-week");
+  await goto(page, "/my-week");
   const nextCard = page.getByTestId("week-next");
   await expect(nextCard).toBeVisible();
   await expect(nextCard).not.toContainText("Nothing posted for next week yet");
@@ -251,7 +269,7 @@ test("a published next week with no job for the brother reads 'No jobs for you n
 test("an officer sees unassigned tasks from a board they run on My tasks, marked as board tasks", async ({ page }) => {
   const title = uniq("Board task");
   await login(page, ADMIN);
-  await page.goto("/chairs/historian");
+  await goto(page, "/chairs/historian");
   const holders = page.getByTestId("current-holders");
   const alreadyHolds = (await holders.count()) && (await holders.getByRole("link", { name: ADMIN.name }).count()) > 0;
   if (!alreadyHolds) {
@@ -268,7 +286,7 @@ test("an officer sees unassigned tasks from a board they run on My tasks, marked
   await page.waitForURL(/\/tasks\/\d+$/);
   const taskHref = new URL(page.url()).pathname;
 
-  await page.goto("/dashboard");
+  await goto(page, "/dashboard");
   const board = page.getByTestId("my-tasks-card").getByTestId("board-tasks");
   await expect(board).toBeVisible();
   await expect(board).toContainText("On my boards, nobody assigned");
@@ -280,11 +298,11 @@ test("an officer sees unassigned tasks from a board they run on My tasks, marked
   await expect(page.getByTestId("my-tasks-card").getByTestId("my-tasks-list").filter({ hasText: title })).toHaveCount(0);
 
   // Hand the chair back so Dylan stays a plain admin for the other suites.
-  await page.goto("/chairs/historian");
+  await goto(page, "/chairs/historian");
   page.once("dialog", (d) => d.accept());
   await page.getByTestId("current-holders").getByRole("button", { name: "End term" }).first().click();
   await expect(page.getByTestId("current-holders")).toHaveCount(0);
-  await page.goto("/dashboard");
+  await goto(page, "/dashboard");
   await expect(page.getByTestId("my-tasks-card").getByTestId("board-tasks")).toHaveCount(0);
 });
 
@@ -354,7 +372,7 @@ test("the calendar feed on /settings serves the brother's jobs as iCal without a
 
 test("admin saves the Venmo handle under house settings and /dues shows it", async ({ page }) => {
   await login(page, ADMIN);
-  await page.goto("/settings");
+  await goto(page, "/settings");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Settings");
   await expect(page.getByTestId("profile-card").getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/settings/password");
   await expect(page.getByTestId("profile-card").getByRole("link", { name: "Edit profile" })).toHaveAttribute("href", /\/members\/\d+\/edit$/);
@@ -363,13 +381,13 @@ test("admin saves the Venmo handle under house settings and /dues shows it", asy
   await expect(page.locator("p[role=status]")).toHaveText("Settings saved.");
   await expect(page.locator("#venmoHandle")).toHaveValue(VENMO);
 
-  await page.goto("/dues");
+  await goto(page, "/dues");
   await expect(page.getByText(`@${VENMO}`)).toBeVisible();
 });
 
 test("audit log lists entries newest first and filters by text", async ({ page }) => {
   await login(page, ADMIN);
-  await page.goto("/settings/audit");
+  await goto(page, "/settings/audit");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audit log");
   const list = page.getByTestId("audit-list");
   await expect(list.locator("li").first()).toBeVisible();
@@ -388,7 +406,7 @@ test("audit log lists entries newest first and filters by text", async ({ page }
 
 test("backup download responds with the sqlite content type for an admin and 403 for a brother", async ({ page }) => {
   await login(page, ADMIN);
-  await page.goto("/settings");
+  await goto(page, "/settings");
   await expect(page.getByTestId("data-card").getByRole("link", { name: "Download database backup" })).toHaveAttribute("href", "/settings/backup");
   const res = await page.request.get("/settings/backup");
   expect(res.status()).toBe(200);
@@ -406,17 +424,17 @@ test("backup download responds with the sqlite content type for an admin and 403
 test("a plain brother cannot open the audit log or house settings, and the phone layout fits", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, BROTHER);
-  await page.goto("/settings/audit");
+  await goto(page, "/settings/audit");
   await expect(page).toHaveURL(/\/dashboard\?denied=audit\.view/);
   await expect(page.getByTestId("denied-notice")).toHaveText("You do not have access to audit.view.");
   await noHorizontalOverflow(page);
 
-  await page.goto("/settings");
+  await goto(page, "/settings");
   await expect(page.getByTestId("profile-card")).toBeVisible();
   await expect(page.locator("#venmoHandle")).toHaveCount(0);
   await expect(page.getByTestId("data-card")).toHaveCount(0);
 
-  await page.goto("/my-week");
+  await goto(page, "/my-week");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("My week");
   await noHorizontalOverflow(page);
 });
