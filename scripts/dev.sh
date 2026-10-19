@@ -20,7 +20,7 @@ case "$cmd" in
     cd "$dir"
     # Each server gets its own tsconfig copy so Next does not rewrite the shared one (which made every server recompile).
     node -e "const fs=require('fs');const t=JSON.parse(fs.readFileSync('tsconfig.json','utf8'));t.include=t.include.map(i=>i==='.next/types/**/*.ts'?'.next-$key/types/**/*.ts':i);fs.writeFileSync('tsconfig.$key.json',JSON.stringify(t,null,2)+'\n')"
-    DATABASE_PATH="$db" NEXT_DIST_DIR=".next-$key" NEXT_TSCONFIG="tsconfig.$key.json" NODE_OPTIONS="--max-old-space-size=2048" setsid node node_modules/next/dist/bin/next dev -p "$port" > "$logfile" 2>&1 &
+    DATABASE_PATH="$db" NEXT_DIST_DIR=".next-$key" NEXT_TSCONFIG="tsconfig.$key.json" NODE_OPTIONS="--max-old-space-size=4096" setsid node node_modules/next/dist/bin/next dev -p "$port" > "$logfile" 2>&1 &
     echo $! > "$pidfile"; echo "$port" > "$portfile"
     for i in $(seq 1 90); do curl -s -o /dev/null "http://127.0.0.1:$port/api/health" && { echo "dev server up on http://127.0.0.1:$port (db $db, pid $(cat "$pidfile"))"; exit 0; }; sleep 1; done
     echo "dev server did not come up; log:"; tail -20 "$logfile"; exit 1 ;;

@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: { default: "ZP House", template: "%s | ZP House" },
   description: "Zeta Psi house management: roster, chairs and tasks, labor, dues, attendance and events.",
   manifest: "/manifest.webmanifest",
+  icons: { apple: "/icon-192.png" },
 };
 
 export const viewport: Viewport = {

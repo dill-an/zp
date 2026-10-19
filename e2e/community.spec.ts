@@ -44,6 +44,26 @@ function futureLocal(days: number, time = "19:00") {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${time}`;
 }
 
+/** A cookie-less GET that survives the dev server dropping the connection while it restarts. */
+async function anonGet(url: string) {
+  const ctx = await playwrightRequest.newContext();
+  try {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const res = await ctx.get(url);
+        return { status: res.status(), contentType: res.headers()["content-type"] ?? "", body: await res.text() };
+      } catch (err) {
+        lastError = err;
+        await new Promise((r) => setTimeout(r, 4_000));
+      }
+    }
+    throw lastError;
+  } finally {
+    await ctx.dispose();
+  }
+}
+
 /** The form's own error message (Next's route announcer also has role="alert"). */
 function formError(page: Page) {
   return page.locator("p[role=alert]");
@@ -507,25 +527,21 @@ test("an RSVP and a duty show up in the brother's calendar feed", async ({ brows
   await brother.page.goto("/settings");
   const url = await brother.page.locator("#calendar-https").inputValue();
   expect(url).toMatch(/\/api\/calendar\/[0-9a-f]{32}$/);
-  const anon = await playwrightRequest.newContext();
-  const res = await anon.get(url);
-  expect(res.status()).toBe(200);
-  expect(res.headers()["content-type"]).toContain("text/calendar");
-  const ics = (await res.text()).replace(/\r\n[ \t]/g, "");
+  const res = await anonGet(url);
+  expect(res.status).toBe(200);
+  expect(res.contentType).toContain("text/calendar");
+  const ics = res.body.replace(/\r\n[ \t]/g, "");
   expect(ics).toContain(`SUMMARY:${title}`);
   expect(ics).toContain(`SUMMARY:Front door: ${title}`);
   expect(ics).toContain("LOCATION:House basement");
-  await anon.dispose();
 
   // Changing the RSVP to not going drops the event but keeps the duty.
   await brother.page.goto(eventUrl);
   await brother.page.getByRole("button", { name: "Not going", exact: true }).click();
   await expect(brother.page.getByText("You: not going")).toBeVisible({ timeout: 30_000 });
-  const again = await playwrightRequest.newContext();
-  const after = ((await (await again.get(url)).text()) ?? "").replace(/\r\n[ \t]/g, "");
+  const after = (await anonGet(url)).body.replace(/\r\n[ \t]/g, "");
   expect(after).not.toContain(`SUMMARY:${title}\r\n`);
   expect(after).toContain(`SUMMARY:Front door: ${title}`);
-  await again.dispose();
 
   await admin.page.goto(eventUrl);
   admin.page.once("dialog", (d) => d.accept());

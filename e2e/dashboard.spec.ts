@@ -8,8 +8,8 @@ import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
  */
 test.describe.configure({ mode: "serial" });
 test.setTimeout(180_000);
-// A navigation that never answers (dev server restarting) must fail fast enough to be retried.
-test.use({ navigationTimeout: 45_000 });
+// A navigation or action that never answers (dev server restarting) must fail fast enough to be retried.
+test.use({ navigationTimeout: 45_000, actionTimeout: 30_000 });
 
 /** Dev servers compile on first hit; give assertions room. */
 const expect = baseExpect.configure({ timeout: 30_000 });
@@ -58,6 +58,28 @@ async function signIn(page: Page, user: { username: string; password: string }) 
       await page.waitForTimeout(3_000);
       // The login itself may have gone through while the page was still loading.
       if (/\/dashboard/.test(page.url()) && (await page.locator("main").isVisible())) return;
+    }
+  }
+  throw lastError;
+}
+
+/** Deletes a task the test created (admin session), so runs do not pile up records. */
+async function deleteTask(page: Page, taskHref: string) {
+  await goto(page, taskHref);
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.waitForURL(/\/tasks\?deleted=1/);
+}
+
+/** A cookie-less GET that survives the dev server dropping the connection while it restarts. */
+async function anonGet(ctx: { get: (url: string) => Promise<import("@playwright/test").APIResponse> }, url: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await ctx.get(url);
+    } catch (err) {
+      lastError = err;
+      await new Promise((r) => setTimeout(r, 4_000));
     }
   }
   throw lastError;
@@ -239,13 +261,14 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
   await expect(page.getByTestId("waiting-card").locator("li[data-waiting-kind=task]").filter({ hasText: taskTitle })).toBeVisible();
   await expect(page.getByTestId("waiting-card").locator("li[data-waiting-kind=duty]").filter({ hasText: eventTitle })).toBeVisible();
 
-  // Tidy up the event so the duty does not linger for other runs.
+  // Tidy up so the duty and task do not linger for other runs.
   await page.context().clearCookies();
   await signIn(page, ADMIN);
   await goto(page, eventHref);
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Delete" }).click();
   await page.waitForURL(/\/events$/);
+  await deleteTask(page, taskHref);
 });
 
 test("a published next week with no job for the brother reads 'No jobs for you next week'", async ({ page }) => {
@@ -301,6 +324,8 @@ test("an officer sees unassigned tasks from a board they run on My tasks, marked
   await page.getByTestId("new-task-link").click();
   await page.waitForURL(/\/tasks\/new\?chair=\d+$/);
   await page.fill("#title", title);
+  // Due tomorrow: the card shows the five most pressing unassigned tasks, dated ones first.
+  await page.fill("#dueAt", `${shiftDate(houseToday(), 1)}T17:00`);
   await page.getByRole("button", { name: "Create task" }).click();
   await page.waitForURL(/\/tasks\/\d+$/);
   const taskHref = new URL(page.url()).pathname;
@@ -316,7 +341,8 @@ test("an officer sees unassigned tasks from a board they run on My tasks, marked
   // It is not one of my own tasks.
   await expect(page.getByTestId("my-tasks-card").getByTestId("my-tasks-list").filter({ hasText: title })).toHaveCount(0);
 
-  // Hand the chair back so Dylan stays a plain admin for the other suites.
+  // Remove the task and hand the chair back so Dylan stays a plain admin for the other suites.
+  await deleteTask(page, taskHref);
   await goto(page, "/chairs/historian");
   page.once("dialog", (d) => d.accept());
   await page.getByTestId("current-holders").getByRole("button", { name: "End term" }).first().click();
@@ -327,7 +353,7 @@ test("an officer sees unassigned tasks from a board they run on My tasks, marked
 
 test("the web app manifest and icons are served without a session", async ({ page, baseURL }) => {
   const anon = await playwrightRequest.newContext({ baseURL });
-  const manifest = await anon.get("/manifest.webmanifest");
+  const manifest = await anonGet(anon, "/manifest.webmanifest");
   expect(manifest.status()).toBe(200);
   expect(manifest.headers()["content-type"]).toContain("application/manifest+json");
   const json = await manifest.json();
@@ -338,7 +364,7 @@ test("the web app manifest and icons are served without a session", async ({ pag
   expect(json.background_color).toBe("#0a0a0a");
   expect(json.icons.map((i: { src: string }) => i.src)).toEqual(["/icon-192.png", "/icon-512.png"]);
   for (const icon of ["/icon-192.png", "/icon-512.png"]) {
-    const res = await anon.get(icon);
+    const res = await anonGet(anon, icon);
     expect(res.status()).toBe(200);
     expect(res.headers()["content-type"]).toContain("image/png");
     expect((await res.body()).subarray(1, 4).toString("ascii")).toBe("PNG");
@@ -363,7 +389,7 @@ test("the calendar feed on /settings serves the brother's jobs as iCal without a
 
   // No cookies at all: calendar apps fetch the feed on their own.
   const anon = await playwrightRequest.newContext();
-  const res = await anon.get(url);
+  const res = await anonGet(anon, url);
   expect(res.status()).toBe(200);
   expect(res.headers()["content-type"]).toContain("text/calendar");
   const ics = unfold(await res.text());
@@ -377,9 +403,9 @@ test("the calendar feed on /settings serves the brother's jobs as iCal without a
   // Seeded Sunday house meetings are in the feed too.
   expect(ics).toContain("SUMMARY:House Meeting");
 
-  const bad = await anon.get(url.replace(/[0-9a-f]{32}$/, "0123456789abcdef0123456789abcdef"));
+  const bad = await anonGet(anon, url.replace(/[0-9a-f]{32}$/, "0123456789abcdef0123456789abcdef"));
   expect(bad.status()).toBe(404);
-  const malformed = await anon.get(url.replace(/[0-9a-f]{32}$/, "nope"));
+  const malformed = await anonGet(anon, url.replace(/[0-9a-f]{32}$/, "nope"));
   expect(malformed.status()).toBe(404);
   await anon.dispose();
 

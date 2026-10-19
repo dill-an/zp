@@ -11,7 +11,8 @@ Chapter management app for Zeta Psi at MIT. It replaces the cleans spreadsheet a
 - **Meetings and attendance**: house meetings, taking attendance on a phone, the semester attendance grid, excuse requests, absence fines.
 - **Events, announcements, maintenance**: RSVPs, sober monitor and setup duties, a calendar, pinned announcements by audience, house maintenance requests.
 - **Roster**: pledge classes, contact info, labor groups (cooks vs cleans), roles and permissions, password resets.
-- **Settings**: house settings (chapter name, semester, Venmo handle, meeting time, fine amounts), audit log of every change, one-click database backup.
+- **Settings**: house settings (chapter name, semester, Venmo handle, meeting time, fine amounts), audit log of every change, one-click database backup, and a personal calendar feed each brother can subscribe to from their phone (cleans, duties, meetings, events, sanction due dates).
+- **Phone friendly**: every page works at phone width, and the app can be added to the home screen like a native app.
 
 ## Run it locally
 Requires Node 22+.
@@ -58,6 +59,13 @@ Back up the database from Settings (admin) or by copying `data/zp.db` while the 
 - `src/app/(app)/<module>/` pages, `src/lib/actions/<module>.ts` server actions, `src/lib/queries/<module>.ts` reads
 - `src/lib/permissions.ts` roles and chair permissions, `src/lib/auth.ts` sessions
 - `docs/specs/` the written spec for each module
+
+## Things to decide in the house
+- **Cook shifts**: the cleans sheet lists who is a cook but not a cook rota, so cook-shift job types are seeded as archived templates ("Dinner cook (Mon)" and so on). The steward restores the ones the house uses under Labor, Job types, and Auto-fill will then spread them across the cooks group.
+- **Friday kitchen**: the sheet had no Friday Kitchen clean, so none is seeded; add one under Job types if the house needs it.
+- **Payton Berry-Briggs** is on the cleans sheet but not on the meeting sheet, so he has no pledge class; set it from his profile (the roster flags it).
+- **Dues amount and due date**: the Fall 2026 period is seeded at $0; the treasurer sets the amount and due date, then bills everyone with one click.
+- **Chairs**: no holders are seeded; the president assigns each chair under Chairs, which grants that officer their permissions.
 
 ## Customizing
 - Chairs, pledge classes and job types are editable in the app.
