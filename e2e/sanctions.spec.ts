@@ -6,6 +6,9 @@ import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
  * (every reason is unique so reruns never collide with earlier data).
  */
 test.describe.configure({ mode: "serial" });
+// A dev server recompiling routes under load can take a minute to answer one navigation; assertions keep the default 5s.
+test.use({ navigationTimeout: 120_000 });
+test.setTimeout(120_000);
 
 test.beforeEach(async ({ page }) => {
   // Against a dev server, hot-reload pushes would reload pages mid-test; a production server has no such socket.
