@@ -21,6 +21,7 @@ import {
   dueItemsFor,
   inPeriod,
   memberStatus,
+  mergeDueItems,
   nextInstallment,
   overallStatus,
   parseInstallmentsJson,
@@ -177,7 +178,7 @@ export function getMemberDueItems(memberId: number): DueItem[] {
     }
     items.push(...dueItemsFor(scopedCharges, b.paidCents));
   }
-  return sortDueItems(items);
+  return mergeDueItems(sortDueItems(items));
 }
 
 export type BalanceRow = MemberBalance & {

@@ -1,4 +1,4 @@
-import { test, expect, type Browser, type BrowserContext, type BrowserContextOptions } from "@playwright/test";
+import { test, expect, request as playwrightRequest, type Browser, type BrowserContext, type BrowserContextOptions } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
 
@@ -482,4 +482,53 @@ test("posting to an audience that excludes the poster lands on All posts", async
   await card.getByRole("button", { name: "Delete" }).click();
   await expect(card).toHaveCount(0);
   await admin.close();
+});
+
+test("an RSVP and a duty show up in the brother's calendar feed", async ({ browser }) => {
+  const admin = await userPage(browser, ADMIN);
+  const brother = await userPage(browser, BROTHER);
+  const title = uniq("Feed check");
+  const eventUrl = await createEvent(admin.page, title, { startsAt: futureLocal(3, "20:00") });
+
+  await brother.page.goto(eventUrl);
+  await brother.page.getByRole("button", { name: "Going", exact: true }).click();
+  await expect(brother.page.getByText("You: going")).toBeVisible();
+
+  await admin.page.getByRole("button", { name: "Add duty" }).click();
+  await admin.page.selectOption("#dutyMemberId", { label: BROTHER.name });
+  await admin.page.selectOption("#duty", "door");
+  await admin.page.fill("#label", "Front door");
+  await admin.page.getByRole("button", { name: "Save duty" }).click();
+  await expect(admin.page.getByText("Duty added.")).toBeVisible();
+
+  // The feed link lives on /settings; the feed itself needs no session.
+  await brother.page.goto("/settings");
+  const url = await brother.page.locator("#calendar-https").inputValue();
+  expect(url).toMatch(/\/api\/calendar\/[0-9a-f]{32}$/);
+  const anon = await playwrightRequest.newContext();
+  const res = await anon.get(url);
+  expect(res.status()).toBe(200);
+  expect(res.headers()["content-type"]).toContain("text/calendar");
+  const ics = (await res.text()).replace(/\r\n[ \t]/g, "");
+  expect(ics).toContain(`SUMMARY:${title}`);
+  expect(ics).toContain(`SUMMARY:Front door: ${title}`);
+  expect(ics).toContain("LOCATION:House basement");
+  await anon.dispose();
+
+  // Changing the RSVP to not going drops the event but keeps the duty.
+  await brother.page.goto(eventUrl);
+  await brother.page.getByRole("button", { name: "Not going", exact: true }).click();
+  await expect(brother.page.getByText("You: not going")).toBeVisible();
+  const again = await playwrightRequest.newContext();
+  const after = ((await (await again.get(url)).text()) ?? "").replace(/\r\n[ \t]/g, "");
+  expect(after).not.toContain(`SUMMARY:${title}\r\n`);
+  expect(after).toContain(`SUMMARY:Front door: ${title}`);
+  await again.dispose();
+
+  await admin.page.goto(eventUrl);
+  admin.page.once("dialog", (d) => d.accept());
+  await admin.page.getByRole("button", { name: "Delete" }).click();
+  await admin.page.waitForURL(/\/events$/);
+  await admin.close();
+  await brother.close();
 });

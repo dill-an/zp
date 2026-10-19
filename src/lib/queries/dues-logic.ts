@@ -81,7 +81,12 @@ export type DueItem = {
   dueDate: string | null;
   remainingCents: number;
   periodId: number | null;
+  /** How many charges this item stands for (same-day fines merge; see mergeDueItems). Absent means one. */
+  count?: number;
 };
+
+/** Kinds whose same-day items merge into one, with the plural used for the merged wording. */
+const MERGED_KINDS: Record<string, string> = { fine: "fines", late_fee: "late fees" };
 
 /** Headline wording for a charge: fines and late fees by kind, everything else by its own description. */
 export function dueItemLabel(charge: { kind: string; description: string }): string {
@@ -112,6 +117,24 @@ export function sortDueItems(items: readonly DueItem[]): DueItem[] {
 }
 
 /**
+ * Fines (and late fees) that fall on the same day collapse into one item, so three sanction fines due Friday read
+ * "$32.50 in 3 fines due Oct 25" instead of three "fine" entries. Other kinds stay separate; order is kept.
+ */
+export function mergeDueItems(items: readonly DueItem[]): DueItem[] {
+  const out: DueItem[] = [];
+  for (const item of items) {
+    const target = item.kind in MERGED_KINDS ? out.find((o) => o.kind === item.kind && o.dueDate === item.dueDate) : undefined;
+    if (target) {
+      target.remainingCents += item.remainingCents;
+      target.count = (target.count ?? 1) + (item.count ?? 1);
+    } else {
+      out.push({ ...item });
+    }
+  }
+  return out;
+}
+
+/**
  * Pieces of the "You owe" line, one per due item: "$25.00 fine due Oct 23", "$450.00 Fall 2026 dues due Nov 1".
  * Dates outside the current year get the year. At most `max` items; the rest collapse into "2 more".
  */
@@ -119,8 +142,10 @@ export function dueLineParts(items: readonly DueItem[], today: string, max = 3):
   const shown = items.slice(0, max);
   const parts = shown.map((item) => {
     const amount = formatCents(item.remainingCents);
-    if (!item.dueDate) return `${amount} ${item.label}`;
-    return `${amount} ${item.label} due ${formatDate(item.dueDate, { year: item.dueDate.slice(0, 4) !== today.slice(0, 4) })}`;
+    const count = item.count ?? 1;
+    const what = count > 1 ? `in ${count} ${MERGED_KINDS[item.kind] ?? item.label}` : item.label;
+    if (!item.dueDate) return `${amount} ${what}`;
+    return `${amount} ${what} due ${formatDate(item.dueDate, { year: item.dueDate.slice(0, 4) !== today.slice(0, 4) })}`;
   });
   const more = items.length - shown.length;
   if (more > 0) parts.push(`${more} more`);

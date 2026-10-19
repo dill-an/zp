@@ -1,4 +1,4 @@
-import { test, expect as baseExpect, type Page } from "@playwright/test";
+import { test, expect as baseExpect, request as playwrightRequest, type Page } from "@playwright/test";
 import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
 
 /**
@@ -24,6 +24,41 @@ test.beforeEach(async ({ page }) => {
 async function noHorizontalOverflow(page: Page) {
   const overflows = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
   expect(overflows).toBe(false);
+}
+
+const HOUSE_TZ = "America/New_York";
+
+/** Today's calendar date in the house timezone. */
+function houseToday(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: HOUSE_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+/** "YYYY-MM-DD" `days` after a calendar date. */
+function shiftDate(date: string, days: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
+
+/** The Sunday that starts next labor week (house time). */
+function nextWeekSunday(): string {
+  const today = houseToday();
+  const [y, m, d] = today.split("-").map(Number);
+  return shiftDate(today, 7 - new Date(Date.UTC(y, m - 1, d)).getUTCDay());
+}
+
+/** Unfolds an iCalendar body so assertions can match whole property lines. */
+function unfold(ics: string): string {
+  return ics.replace(/\r\n[ \t]/g, "");
+}
+
+/** The brother's calendar feed URL as shown on /settings. */
+async function feedUrl(page: Page): Promise<string> {
+  await page.goto("/settings");
+  await expect(page.getByTestId("calendar-card")).toBeVisible();
+  const url = await page.locator("#calendar-https").inputValue();
+  expect(url).toMatch(/^https?:\/\/.+\/api\/calendar\/[0-9a-f]{32}$/);
+  return url;
 }
 
 test("admin dashboard shows the officer panel and house pulse, then assigns Martin a job this week", async ({ page }) => {
@@ -74,11 +109,14 @@ test("a brother's dashboard shows My week with the assignment, dues and next mee
   await expect(job.getByText("Mon-Wed")).toBeVisible();
   const markDone = job.getByRole("button", { name: "Mark done" });
   if (await markDone.count()) {
+    // An open job shows the relative due text after a space, never glued to the date.
+    await expect(job.getByTestId("job-due")).toHaveText(/due \w{3}, \w{3} \d{1,2} \((due today|due tomorrow|due in \d+ days|\d+ days? overdue)\)/);
     await markDone.click();
     await expect(job.getByText("Done", { exact: true })).toBeVisible();
   }
   await expect(job.getByText(/^(Done|Verified)$/)).toBeVisible();
   await expect(job.getByRole("button", { name: "Mark done" })).toHaveCount(0);
+
 
   const dues = page.getByTestId("dues-card");
   await expect(dues).toBeVisible();
@@ -94,6 +132,19 @@ test("a brother's dashboard shows My week with the assignment, dues and next mee
   await expect(page.getByTestId("officer-panel")).toHaveCount(0);
   await expect(page.getByTestId("house-pulse")).toBeVisible();
 
+  // Seeded brothers have no phone or email on file, so the dashboard asks for them.
+  const notice = page.getByTestId("contact-notice");
+  if (await notice.count()) {
+    await expect(notice).toContainText("Add your phone and email so officers can reach you.");
+    await expect(notice.getByRole("link", { name: "Edit profile" })).toHaveAttribute("href", /^\/members\/\d+\/edit$/);
+  } else {
+    // Another run filled them in: the notice only goes away once both are set.
+    await page.goto("/settings");
+    await page.getByTestId("profile-card").getByRole("link", { name: "Edit profile" }).click();
+    await expect(page.locator("#phone")).not.toHaveValue("");
+    await expect(page.locator("#email")).not.toHaveValue("");
+  }
+
   // My week: the same job, header counts.
   await page.goto("/my-week");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("My week");
@@ -103,6 +154,202 @@ test("a brother's dashboard shows My week with the assignment, dues and next mee
   await expect(weekJob.getByText(/^(Done|Verified)$/)).toBeVisible();
   await expect(page.getByTestId("week-meetings")).toBeVisible();
   await expect(page.getByTestId("week-next")).toBeVisible();
+});
+
+test("Waiting on you lists a task just assigned to the brother and an event duty this week, linking to where the action happens", async ({ page }) => {
+  const taskTitle = uniq("Waiting task");
+  const eventTitle = uniq("Waiting event");
+  const today = houseToday();
+
+  await login(page, ADMIN);
+  // A task assigned to Gio right now.
+  await page.goto("/tasks/new");
+  await page.fill("#title", taskTitle);
+  await page.getByLabel(BROTHER.name).check();
+  await page.getByRole("button", { name: "Create task" }).click();
+  await page.waitForURL(/\/tasks\/\d+$/);
+  const taskHref = new URL(page.url()).pathname;
+
+  // An event later today (so it sits inside the current labor week) with a duty for Gio.
+  await page.goto("/events/new");
+  await page.fill("#title", eventTitle);
+  await page.fill("#startsAt", `${today}T23:30`);
+  await page.fill("#endsAt", `${shiftDate(today, 1)}T03:00`);
+  await page.getByRole("button", { name: "Create event" }).click();
+  await page.waitForURL(/\/events\/\d+$/);
+  const eventHref = new URL(page.url()).pathname;
+  await page.getByRole("button", { name: "Add duty" }).click();
+  await page.selectOption("#dutyMemberId", { label: BROTHER.name });
+  await page.selectOption("#duty", "sober_monitor");
+  await page.fill("#label", "Late shift");
+  await page.getByRole("button", { name: "Save duty" }).click();
+  await expect(page.getByText("Duty added.")).toBeVisible();
+
+  await page.context().clearCookies();
+  await login(page, BROTHER);
+  const card = page.getByTestId("waiting-card");
+  await expect(card).toBeVisible();
+  const taskRow = card.locator("li[data-waiting-kind=task]").filter({ hasText: taskTitle });
+  await expect(taskRow).toBeVisible();
+  await expect(taskRow).toContainText("New task");
+  await expect(taskRow.getByRole("link")).toHaveAttribute("href", taskHref);
+  const dutyRow = card.locator("li[data-waiting-kind=duty]").filter({ hasText: eventTitle });
+  await expect(dutyRow).toContainText(`Late shift at ${eventTitle}`);
+  await expect(dutyRow.getByRole("link")).toHaveAttribute("href", eventHref);
+
+  // The same card opens My week.
+  await page.goto("/my-week");
+  await expect(page.getByTestId("waiting-card").locator("li[data-waiting-kind=task]").filter({ hasText: taskTitle })).toBeVisible();
+  await expect(page.getByTestId("waiting-card").locator("li[data-waiting-kind=duty]").filter({ hasText: eventTitle })).toBeVisible();
+
+  // Tidy up the event so the duty does not linger for other runs.
+  await page.context().clearCookies();
+  await login(page, ADMIN);
+  await page.goto(eventHref);
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete" }).click();
+  await page.waitForURL(/\/events$/);
+});
+
+test("a published next week with no job for the brother reads 'No jobs for you next week'", async ({ page }) => {
+  const next = nextWeekSunday();
+  await login(page, ADMIN);
+  await page.goto(`/labor/week/${next}`);
+  const create = page.getByRole("button", { name: "Create empty week" });
+  if (await create.isVisible()) {
+    await create.click();
+    await page.waitForURL(new RegExp(`/labor/week/${next}\\?manage=1`));
+  }
+  await page.goto(`/labor/week/${next}?manage=1`);
+  const publish = page.getByRole("button", { name: "Publish", exact: true });
+  if (await publish.count()) {
+    await publish.click();
+    await expect(page.getByRole("button", { name: "Unpublish" })).toBeVisible();
+  }
+
+  await page.context().clearCookies();
+  await login(page, BROTHER);
+  const card = page.getByTestId("my-week-card");
+  await expect(card).toBeVisible();
+  const empty = card.getByTestId("my-week-next-empty");
+  const noJobs = (await empty.count()) > 0;
+  if (noJobs) {
+    await expect(empty).toHaveText("No jobs for you next week.");
+  } else {
+    // Someone gave Gio a job next week; the list shows instead of the empty line.
+    await expect(card.getByTestId("my-week-next")).toBeVisible();
+  }
+  await expect(card).not.toContainText("Nothing posted for next week yet");
+
+  await page.goto("/my-week");
+  const nextCard = page.getByTestId("week-next");
+  await expect(nextCard).toBeVisible();
+  await expect(nextCard).not.toContainText("Nothing posted for next week yet");
+  if (noJobs) await expect(nextCard).toContainText("No jobs for you next week.");
+});
+
+test("an officer sees unassigned tasks from a board they run on My tasks, marked as board tasks", async ({ page }) => {
+  const title = uniq("Board task");
+  await login(page, ADMIN);
+  await page.goto("/chairs/historian");
+  const holders = page.getByTestId("current-holders");
+  const alreadyHolds = (await holders.count()) && (await holders.getByRole("link", { name: ADMIN.name }).count()) > 0;
+  if (!alreadyHolds) {
+    await page.getByRole("button", { name: "Assign holder" }).click();
+    await page.selectOption("#memberId", { label: ADMIN.name });
+    await page.getByRole("button", { name: "Assign", exact: true }).click();
+    await expect(page.getByTestId("current-holders").getByRole("link", { name: ADMIN.name })).toBeVisible();
+  }
+
+  await page.getByTestId("new-task-link").click();
+  await page.waitForURL(/\/tasks\/new\?chair=\d+$/);
+  await page.fill("#title", title);
+  await page.getByRole("button", { name: "Create task" }).click();
+  await page.waitForURL(/\/tasks\/\d+$/);
+  const taskHref = new URL(page.url()).pathname;
+
+  await page.goto("/dashboard");
+  const board = page.getByTestId("my-tasks-card").getByTestId("board-tasks");
+  await expect(board).toBeVisible();
+  await expect(board).toContainText("On my boards, nobody assigned");
+  const row = board.locator("li[data-board='1']").filter({ hasText: title });
+  await expect(row).toBeVisible();
+  await expect(row.getByText("Board", { exact: true })).toBeVisible();
+  await expect(row.getByRole("link", { name: title })).toHaveAttribute("href", taskHref);
+  // It is not one of my own tasks.
+  await expect(page.getByTestId("my-tasks-card").getByTestId("my-tasks-list").filter({ hasText: title })).toHaveCount(0);
+
+  // Hand the chair back so Dylan stays a plain admin for the other suites.
+  await page.goto("/chairs/historian");
+  page.once("dialog", (d) => d.accept());
+  await page.getByTestId("current-holders").getByRole("button", { name: "End term" }).first().click();
+  await expect(page.getByTestId("current-holders")).toHaveCount(0);
+  await page.goto("/dashboard");
+  await expect(page.getByTestId("my-tasks-card").getByTestId("board-tasks")).toHaveCount(0);
+});
+
+test("the web app manifest and icons are served without a session", async ({ page, baseURL }) => {
+  const anon = await playwrightRequest.newContext({ baseURL });
+  const manifest = await anon.get("/manifest.webmanifest");
+  expect(manifest.status()).toBe(200);
+  expect(manifest.headers()["content-type"]).toContain("application/manifest+json");
+  const json = await manifest.json();
+  expect(json.name).toBe("ZP House");
+  expect(json.short_name).toBe("ZP House");
+  expect(json.display).toBe("standalone");
+  expect(json.theme_color).toBe("#0a0a0a");
+  expect(json.background_color).toBe("#0a0a0a");
+  expect(json.icons.map((i: { src: string }) => i.src)).toEqual(["/icon-192.png", "/icon-512.png"]);
+  for (const icon of ["/icon-192.png", "/icon-512.png"]) {
+    const res = await anon.get(icon);
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toContain("image/png");
+    expect((await res.body()).subarray(1, 4).toString("ascii")).toBe("PNG");
+  }
+  await anon.dispose();
+
+  await login(page, ADMIN);
+  await expect(page.locator("link[rel=manifest]")).toHaveAttribute("href", "/manifest.webmanifest");
+});
+
+test("the calendar feed on /settings serves the brother's jobs as iCal without a session and rejects a bad token", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await login(page, CLEANER);
+  const url = await feedUrl(page);
+  const webcal = await page.locator("#calendar-webcal").inputValue();
+  expect(webcal).toBe(url.replace(/^https?:\/\//, "webcal://"));
+  await expect(page.getByTestId("calendar-card")).toContainText("iPhone:");
+  await expect(page.getByTestId("calendar-card")).toContainText("Google Calendar:");
+  await page.getByTestId("copy-calendar-webcal").click();
+  await expect(page.getByTestId("copy-calendar-webcal")).toHaveText("Copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(webcal);
+
+  // No cookies at all: calendar apps fetch the feed on their own.
+  const anon = await playwrightRequest.newContext();
+  const res = await anon.get(url);
+  expect(res.status()).toBe(200);
+  expect(res.headers()["content-type"]).toContain("text/calendar");
+  const ics = unfold(await res.text());
+  expect(ics.startsWith("BEGIN:VCALENDAR\r\n")).toBe(true);
+  expect(ics).toContain("END:VCALENDAR");
+  // Martin's job from the first test, all-day on its due date.
+  const job = ics.split("BEGIN:VEVENT").find((chunk) => chunk.includes(`SUMMARY:Clean: ${JOB}`));
+  expect(job).toBeTruthy();
+  expect(job).toMatch(/DTSTART;VALUE=DATE:\d{8}/);
+  expect(job).toMatch(/URL:https?:\/\/.+\/labor\/week\/\d{4}-\d{2}-\d{2}/);
+  // Seeded Sunday house meetings are in the feed too.
+  expect(ics).toContain("SUMMARY:House Meeting");
+
+  const bad = await anon.get(url.replace(/[0-9a-f]{32}$/, "0123456789abcdef0123456789abcdef"));
+  expect(bad.status()).toBe(404);
+  const malformed = await anon.get(url.replace(/[0-9a-f]{32}$/, "nope"));
+  expect(malformed.status()).toBe(404);
+  await anon.dispose();
+
+  // Each brother gets a different link.
+  await page.context().clearCookies();
+  await login(page, BROTHER);
+  expect(await feedUrl(page)).not.toBe(url);
 });
 
 test("admin saves the Venmo handle under house settings and /dues shows it", async ({ page }) => {

@@ -10,6 +10,7 @@ import {
   earliestUnpaidDue,
   inPeriod,
   memberStatus,
+  mergeDueItems,
   nextInstallment,
   outstandingCharges,
   overallStatus,
@@ -161,6 +162,33 @@ describe("outstandingCharges and due items", () => {
       "$30.00 Formal ticket",
     ]);
     expect(dueLineParts([], TODAY)).toEqual([]);
+  });
+
+  it("merges same-day fines and late fees into one item, leaving dues and other days alone", () => {
+    const fineA = { amountCents: 1500, periodId: null, dueDate: "2026-10-25", kind: "fine", description: "Fine: Loud" };
+    const fineB = { amountCents: 1000, periodId: null, dueDate: "2026-10-25", kind: "fine", description: "Fine: Late" };
+    const fineC = { amountCents: 750, periodId: null, dueDate: "2026-10-25", kind: "fine", description: "Fine: Mess" };
+    const later = { amountCents: 500, periodId: null, dueDate: "2026-11-02", kind: "fine", description: "Fine: Other" };
+    const lateFee = { amountCents: 2500, periodId: 1, dueDate: "2026-10-25", kind: "late_fee", description: "Fall 2026 late fee" };
+    const merged = mergeDueItems(sortDueItems([...dueItemsFor([fine, dues, later, fineA, fineB, fineC, lateFee], 0)]));
+    expect(merged.map((i) => [i.label, i.remainingCents, i.count ?? 1])).toEqual([
+      ["fine", 2500, 1],
+      ["fine", 3250, 3],
+      ["late fee", 2500, 1],
+      ["Fall 2026 dues", 85000, 1],
+      ["fine", 500, 1],
+    ]);
+    expect(dueLineParts(merged, TODAY, 5)).toEqual([
+      "$25.00 fine due Oct 23",
+      "$32.50 in 3 fines due Oct 25",
+      "$25.00 late fee due Oct 25",
+      "$850.00 Fall 2026 dues due Nov 1",
+      "$5.00 fine due Nov 2",
+    ]);
+    // Two dues charges on one day are not merged, and the input is left untouched.
+    const twice = [...dueItemsFor([dues, { ...dues, description: "Fall 2026 dues (room)" }], 0)];
+    expect(mergeDueItems(twice)).toHaveLength(2);
+    expect(twice.map((i) => i.count)).toEqual([undefined, undefined]);
   });
 });
 
