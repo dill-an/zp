@@ -32,6 +32,7 @@ function Panel({ title, href, children }: { title: string; href: string; childre
 /** Officer-only cards: one per chair held plus one per module permission. */
 export function OfficerPanel({ panel }: { panel: OfficerPanelData }) {
   if (panel.isEmpty) return null;
+  const laborNotice = panel.labor ? laborWeekNotice({ exists: panel.labor.hasWeek, isPublished: panel.labor.hasWeek && !panel.labor.isDraft }, panel.labor.weekStart) : null;
   return (
     <section className="space-y-3" data-testid="officer-panel" aria-labelledby="officer-panel-heading">
       <h2 id="officer-panel-heading" className="text-lg font-semibold">
@@ -54,14 +55,11 @@ export function OfficerPanel({ panel }: { panel: OfficerPanelData }) {
 
         {panel.labor ? (
           <Panel title={`Labor · week of ${formatDate(panel.labor.weekStart)}`} href="/labor">
-            {(() => {
-              const notice = laborWeekNotice({ exists: panel.labor.hasWeek, isPublished: panel.labor.hasWeek && !panel.labor.isDraft }, panel.labor.weekStart);
-              return notice ? (
-                <Line href={notice.href} tone="warning">
-                  <span data-testid="labor-week-notice">{notice.text}</span>
-                </Line>
-              ) : null;
-            })()}
+            {laborNotice ? (
+              <Line href={laborNotice.href} tone="warning">
+                <span data-testid="labor-week-notice">{laborNotice.text}</span>
+              </Line>
+            ) : null}
             {panel.labor.hasWeek ? (
               <>
                 <Line href="/labor?manage=1" tone={panel.labor.unfilled ? "warning" : undefined}>

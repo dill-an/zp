@@ -8,6 +8,8 @@ import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
  */
 test.describe.configure({ mode: "serial" });
 test.setTimeout(180_000);
+// A navigation that never answers (dev server restarting) must fail fast enough to be retried.
+test.use({ navigationTimeout: 45_000 });
 
 /** Dev servers compile on first hit; give assertions room. */
 const expect = baseExpect.configure({ timeout: 30_000 });
@@ -39,6 +41,23 @@ async function goto(page: Page, path: string) {
     } catch (err) {
       lastError = err;
       await page.waitForTimeout(3_000);
+    }
+  }
+  throw lastError;
+}
+
+/** login() with the same retry, since the helper's own navigation can be caught by that restart. */
+async function signIn(page: Page, user: { username: string; password: string }) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await login(page, user);
+      return;
+    } catch (err) {
+      lastError = err;
+      await page.waitForTimeout(3_000);
+      // The login itself may have gone through while the page was still loading.
+      if (/\/dashboard/.test(page.url()) && (await page.locator("main").isVisible())) return;
     }
   }
   throw lastError;
@@ -80,7 +99,7 @@ async function feedUrl(page: Page): Promise<string> {
 }
 
 test("admin dashboard shows the officer panel and house pulse, then assigns Martin a job this week", async ({ page }) => {
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/Good (morning|afternoon|evening), Dylan/);
   await expect(page.getByTestId("officer-panel")).toBeVisible();
   await expect(page.getByTestId("officer-panel").getByText(/Labor · week of/)).toBeVisible();
@@ -117,7 +136,7 @@ test("admin dashboard shows the officer panel and house pulse, then assigns Mart
 });
 
 test("a brother's dashboard shows My week with the assignment, dues and next meeting; My week lists it too", async ({ page }) => {
-  await login(page, CLEANER);
+  await signIn(page, CLEANER);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Martin");
 
   const card = page.getByTestId("my-week-card");
@@ -179,7 +198,7 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
   const eventTitle = uniq("Waiting event");
   const today = houseToday();
 
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   // A task assigned to Gio right now.
   await goto(page, "/tasks/new");
   await page.fill("#title", taskTitle);
@@ -204,7 +223,7 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
   await expect(page.getByText("Duty added.")).toBeVisible();
 
   await page.context().clearCookies();
-  await login(page, BROTHER);
+  await signIn(page, BROTHER);
   const card = page.getByTestId("waiting-card");
   await expect(card).toBeVisible();
   const taskRow = card.locator("li[data-waiting-kind=task]").filter({ hasText: taskTitle });
@@ -222,7 +241,7 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
 
   // Tidy up the event so the duty does not linger for other runs.
   await page.context().clearCookies();
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   await goto(page, eventHref);
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Delete" }).click();
@@ -231,7 +250,7 @@ test("Waiting on you lists a task just assigned to the brother and an event duty
 
 test("a published next week with no job for the brother reads 'No jobs for you next week'", async ({ page }) => {
   const next = nextWeekSunday();
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   await goto(page, `/labor/week/${next}`);
   const create = page.getByRole("button", { name: "Create empty week" });
   if (await create.isVisible()) {
@@ -246,7 +265,7 @@ test("a published next week with no job for the brother reads 'No jobs for you n
   }
 
   await page.context().clearCookies();
-  await login(page, BROTHER);
+  await signIn(page, BROTHER);
   const card = page.getByTestId("my-week-card");
   await expect(card).toBeVisible();
   const empty = card.getByTestId("my-week-next-empty");
@@ -268,7 +287,7 @@ test("a published next week with no job for the brother reads 'No jobs for you n
 
 test("an officer sees unassigned tasks from a board they run on My tasks, marked as board tasks", async ({ page }) => {
   const title = uniq("Board task");
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   await goto(page, "/chairs/historian");
   const holders = page.getByTestId("current-holders");
   const alreadyHolds = (await holders.count()) && (await holders.getByRole("link", { name: ADMIN.name }).count()) > 0;
@@ -326,13 +345,13 @@ test("the web app manifest and icons are served without a session", async ({ pag
   }
   await anon.dispose();
 
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   await expect(page.locator("link[rel=manifest]")).toHaveAttribute("href", "/manifest.webmanifest");
 });
 
 test("the calendar feed on /settings serves the brother's jobs as iCal without a session and rejects a bad token", async ({ page }) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await login(page, CLEANER);
+  await signIn(page, CLEANER);
   const url = await feedUrl(page);
   const webcal = await page.locator("#calendar-webcal").inputValue();
   expect(webcal).toBe(url.replace(/^https?:\/\//, "webcal://"));
@@ -366,12 +385,12 @@ test("the calendar feed on /settings serves the brother's jobs as iCal without a
 
   // Each brother gets a different link.
   await page.context().clearCookies();
-  await login(page, BROTHER);
+  await signIn(page, BROTHER);
   expect(await feedUrl(page)).not.toBe(url);
 });
 
 test("admin saves the Venmo handle under house settings and /dues shows it", async ({ page }) => {
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   await goto(page, "/settings");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Settings");
   await expect(page.getByTestId("profile-card").getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/settings/password");
@@ -386,7 +405,7 @@ test("admin saves the Venmo handle under house settings and /dues shows it", asy
 });
 
 test("audit log lists entries newest first and filters by text", async ({ page }) => {
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   await goto(page, "/settings/audit");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audit log");
   const list = page.getByTestId("audit-list");
@@ -405,7 +424,7 @@ test("audit log lists entries newest first and filters by text", async ({ page }
 });
 
 test("backup download responds with the sqlite content type for an admin and 403 for a brother", async ({ page }) => {
-  await login(page, ADMIN);
+  await signIn(page, ADMIN);
   await goto(page, "/settings");
   await expect(page.getByTestId("data-card").getByRole("link", { name: "Download database backup" })).toHaveAttribute("href", "/settings/backup");
   const res = await page.request.get("/settings/backup");
@@ -416,14 +435,14 @@ test("backup download responds with the sqlite content type for an admin and 403
   expect(body.subarray(0, 15).toString("utf8")).toBe("SQLite format 3");
 
   await page.context().clearCookies();
-  await login(page, BROTHER);
+  await signIn(page, BROTHER);
   const denied = await page.request.get("/settings/backup");
   expect(denied.status()).toBe(403);
 });
 
 test("a plain brother cannot open the audit log or house settings, and the phone layout fits", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await login(page, BROTHER);
+  await signIn(page, BROTHER);
   await goto(page, "/settings/audit");
   await expect(page).toHaveURL(/\/dashboard\?denied=audit\.view/);
   await expect(page.getByTestId("denied-notice")).toHaveText("You do not have access to audit.view.");

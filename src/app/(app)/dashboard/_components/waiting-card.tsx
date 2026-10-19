@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { Badge, type Tone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import type { WaitingItem, WaitingKind } from "@/lib/queries/dashboard-logic";
 import { cn } from "@/lib/utils";
 import { DashCard } from "./dash-card";
@@ -30,7 +30,7 @@ export function WaitingCard({ items, className }: { items: WaitingItem[]; classN
             <Link href={item.href} className="group flex items-center gap-3 py-2 hover:bg-surface-2 sm:-mx-2 sm:rounded-md sm:px-2">
               <div className="min-w-0 flex-1 space-y-0.5">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={item.tone as Tone}>{KIND_LABELS[item.kind]}</Badge>
+                  <Badge tone={item.tone}>{KIND_LABELS[item.kind]}</Badge>
                   <span className="font-medium group-hover:underline">{item.title}</span>
                 </div>
                 <p className="text-sm text-muted">{item.detail}</p>
