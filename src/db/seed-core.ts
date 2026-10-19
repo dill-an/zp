@@ -8,6 +8,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as s from "./schema";
 import { SEED_ATTENDANCE, SEED_MEETING_DATES_RECORDED, SEED_MEETING_DATES_UPCOMING, SEED_MEMBERS, SEED_PLEDGE_CLASSES } from "./seed-data/roster";
 import { SEED_JOB_TYPES, SEED_WEEKS } from "./seed-data/cleans";
+import { buildAliasIndex, type AliasEntry } from "./seed-data/aliases";
 import { SEED_CHAIRS, SEED_TASKS } from "./seed-data/chairs";
 import { slugify } from "../lib/utils";
 import { addDaysISO, dateAtLocalTime, todayISO } from "../lib/dates";
@@ -59,7 +60,7 @@ export function seedDatabase(db: Db, opts: SeedOptions = {}): SeedResult {
 
   // Members
   const memberIdByKey = new Map<string, number>(); // "First Last" -> id
-  const memberIdByAlias = new Map<string, number>(); // preferred name / alias (lowercase) -> id
+  const aliasEntries: AliasEntry[] = [];
   const usernames = new Set<string>();
   for (const m of SEED_MEMBERS) {
     let username = `${slugify(m.first)}.${slugify(m.last)}`;
@@ -85,16 +86,10 @@ export function seedDatabase(db: Db, opts: SeedOptions = {}): SeedResult {
       .returning({ id: s.members.id })
       .get();
     memberIdByKey.set(`${m.first} ${m.last}`, row.id);
-    for (const alias of [preferred, ...(m.aliases ?? [])]) memberIdByAlias.set(alias.toLowerCase(), row.id);
+    aliasEntries.push({ id: row.id, first: m.first, preferred: m.preferred, aliases: m.aliases, laborGroup: m.laborGroup });
   }
-  // Only register bare first names as aliases when unambiguous within the labor pool.
-  const firstCounts = new Map<string, number>();
-  for (const m of SEED_MEMBERS) if (m.laborGroup !== "none") firstCounts.set(m.first.toLowerCase(), (firstCounts.get(m.first.toLowerCase()) ?? 0) + 1);
-  for (const m of SEED_MEMBERS) {
-    if (m.laborGroup === "none") continue;
-    const key = m.first.toLowerCase();
-    if (firstCounts.get(key) === 1 && !memberIdByAlias.has(key)) memberIdByAlias.set(key, memberIdByKey.get(`${m.first} ${m.last}`)!);
-  }
+  // Short names on the cleans sheet -> member ids (labor-pool members win bare first names).
+  const memberIdByAlias = buildAliasIndex(aliasEntries);
 
   const adminId = memberIdByKey.get("Dylan Nguyen") ?? null;
 
