@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CurrentUser } from "@/lib/permissions";
 import {
+  boardChairIds,
   canActOnTask,
   canCreateTaskForChair,
   canEditTask,
@@ -10,6 +11,7 @@ import {
   dueLabel,
   formatDueCompact,
   isOverdue,
+  mineCountsLabel,
   nextOccurrenceDue,
   parseChecklistText,
   parseTags,
@@ -236,6 +238,23 @@ describe("activity helpers", () => {
   it("diffs assignee lists", () => {
     expect(diffAssignees([1, 2, 3], [2, 3, 4])).toEqual({ added: [4], removed: [1] });
     expect(diffAssignees([], [])).toEqual({ added: [], removed: [] });
+  });
+});
+
+describe("On my boards (chair holders' Mine tab)", () => {
+  it("lists every held chair when no chair filter is set, de-duplicated", () => {
+    expect(boardChairIds([7, 8, 7])).toEqual([7, 8]);
+    expect(boardChairIds([])).toEqual([]);
+  });
+  it("narrows to the filtered chair only when the user holds it", () => {
+    expect(boardChairIds([7, 8], 8)).toEqual([8]);
+    expect(boardChairIds([7, 8], 9)).toEqual([]);
+    // General tasks never sit on a board.
+    expect(boardChairIds([7, 8], "general")).toEqual([]);
+  });
+  it("keeps the assigned and board counts apart in the summary", () => {
+    expect(mineCountsLabel(3, 2)).toBe("3 assigned · 2 on my boards");
+    expect(mineCountsLabel(0, 0)).toBe("0 assigned · 0 on my boards");
   });
 });
 

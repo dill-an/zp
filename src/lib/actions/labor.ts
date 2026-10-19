@@ -92,7 +92,12 @@ const createWeekSchema = z.object({
   mode: z.enum(["empty", "copy", "autofill"]).default("empty"),
 });
 
-/** Create a labor week: empty, copied from the most recent earlier week, or auto-filled. */
+/**
+ * Create a labor week: empty, copied from the most recent earlier week, or auto-filled. Empty and
+ * copied weeks are posted right away (the manager chose every name, or last week's names). An
+ * auto-filled week is saved as a draft so the manager reviews the machine's picks before brothers
+ * see them; both of those land in manage mode.
+ */
 export async function createWeek(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   let target: string | null = null;
   let skippedNote = "";
@@ -102,7 +107,7 @@ export async function createWeek(_prev: ActionResult | null, formData: FormData)
     if ("result" in parsed) return parsed.result;
     const { weekStart, mode } = parsed.data;
     if (getWeek(weekStart)) return fail("That week already exists.");
-    const week = db.insert(laborWeeks).values({ weekStart, isPublished: true, createdById: user.id }).returning().get();
+    const week = db.insert(laborWeeks).values({ weekStart, isPublished: mode !== "autofill", createdById: user.id }).returning().get();
     let created = 0;
     if (mode === "copy") {
       const prev = getPreviousWeek(weekStart);
@@ -135,11 +140,11 @@ export async function createWeek(_prev: ActionResult | null, formData: FormData)
       action: "labor.week.create",
       entityType: "labor_week",
       entityId: week.id,
-      summary: `${user.username} created the labor week of ${weekStart} (${mode}, ${created} assignments)${skippedNote ? `; ${skippedNote}` : ""}`,
+      summary: `${user.username} created the labor week of ${weekStart} (${mode}, ${created} assignments${mode === "autofill" ? ", draft" : ""})${skippedNote ? `; ${skippedNote}` : ""}`,
     });
     revalidateLabor();
-    if (mode === "empty") target = `/labor/week/${weekStart}?manage=1`;
-    return ok(mode === "copy" ? `Week created with ${created} assignments copied.${skippedNote ? ` ${skippedNote}` : ""}` : mode === "autofill" ? `Week created and ${created} slots filled.` : "Week created.");
+    if (mode === "empty" || mode === "autofill") target = `/labor/week/${weekStart}?manage=1`;
+    return ok(mode === "copy" ? `Week created with ${created} assignments copied.${skippedNote ? ` ${skippedNote}` : ""}` : mode === "autofill" ? `Draft week created and ${created} slots filled.` : "Week created.");
   });
   if (target) redirect(target);
   return result;

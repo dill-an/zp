@@ -112,6 +112,29 @@ export const SEED_JOB_TYPES: SeedJobType[] = [
     instructions: "One-off kitchen clean on the Sunday that opens the week (used for the first week of the semester).",
     isActive: false,
   },
+  // Cook-shift templates. The cooks group is not scheduled through the sheet yet, so these start
+  // archived; the steward restores them from /labor/jobs once the house wants cook shifts on the grid.
+  ...([
+    ["cook_mon", "Mon", "Monday", 1],
+    ["cook_tue", "Tue", "Tuesday", 2],
+    ["cook_wed", "Wed", "Wednesday", 3],
+    ["cook_thu", "Thu", "Thursday", 4],
+    ["cook_sun", "Sun", "Sunday", 7],
+  ] as const).map(
+    ([key, day, dayName, offset]): SeedJobType => ({
+      key,
+      name: `Dinner cook (${day})`,
+      kind: "cook",
+      category: "meal",
+      windowLabel: day,
+      startOffsetDays: offset,
+      dueOffsetDays: offset,
+      slots: 2,
+      points: 1,
+      instructions: `Cook dinner for the house on ${dayName}: plan the menu with the steward, shop or pull from the pantry, serve by 6:30pm, and leave the kitchen ready for the kitchen clean.`,
+      isActive: false,
+    }),
+  ),
 ];
 
 /** week_start (Sunday) -> job key -> names in slot order (preferred names / aliases as on the sheet). */

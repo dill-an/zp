@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { chairHolders, chairs, members, pledgeClasses, type Chair, type ChairHolder, type Member, type PledgeClass } from "@/db/schema";
-import { filterRoster, rosterSummary, type RosterParams, type RosterSummary } from "./members-logic";
+import { filterRoster, membersMissingClass, rosterSummary, type RosterParams, type RosterSummary } from "./members-logic";
 
 export type ChairRef = Pick<Chair, "id" | "slug" | "name" | "category" | "isExec" | "isActive">;
 
@@ -55,6 +55,27 @@ export function searchMembers(params: RosterParams): RosterRow[] {
 
 export function summarizeRoster(rows: RosterRow[]): RosterSummary {
   return rosterSummary(rows);
+}
+
+export type MemberRef = Pick<Member, "id" | "firstName" | "lastName" | "preferredName" | "username" | "status" | "pledgeClassId">;
+
+/** Brothers on the default roster (not inactive or alumni) with no pledge class, by last name. Hygiene list for members.manage. */
+export function listMembersMissingClass(): MemberRef[] {
+  const rows = db
+    .select({
+      id: members.id,
+      firstName: members.firstName,
+      lastName: members.lastName,
+      preferredName: members.preferredName,
+      username: members.username,
+      status: members.status,
+      pledgeClassId: members.pledgeClassId,
+    })
+    .from(members)
+    .where(isNull(members.pledgeClassId))
+    .orderBy(asc(members.lastName), asc(members.firstName))
+    .all();
+  return membersMissingClass(rows);
 }
 
 /** Member, pledge class, chairs held now and before (with terms). */

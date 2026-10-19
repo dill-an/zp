@@ -3,11 +3,12 @@
  * unit tested in dashboard-logic.test.ts.
  */
 import { z } from "zod";
-import { addDaysISO, APP_TIMEZONE, toHouseDate } from "@/lib/dates";
+import { addDaysISO, APP_TIMEZONE, dueDescription, formatDate, formatDateTime, toHouseDate } from "@/lib/dates";
 import { centsToInput, parseDollarsToCents } from "@/lib/money";
 import { PERMISSIONS } from "@/lib/permissions";
 import { isValidISODate, type AssignmentState } from "@/lib/queries/labor-logic";
 import { SETTING_KEYS } from "@/lib/settings-keys";
+import { humanize } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Greeting and dates                                                  */
@@ -51,6 +52,157 @@ export function dueBucket(dueAt: string | null | undefined, weekStart: string, n
 export function completionPercent(done: number, total: number): number {
   if (total <= 0) return 0;
   return Math.round((done / total) * 100);
+}
+
+/** "due Wed, Oct 21" plus, for open jobs, the relative part: "due Wed, Oct 21 (due in 2 days)". */
+export function jobDueParts(dueDate: string, showRelative: boolean, now: Date = new Date()): { base: string; relative: string | null } {
+  return { base: `due ${formatDate(dueDate, { weekday: true })}`, relative: showRelative ? dueDescription(dueDate, now) : null };
+}
+
+export function jobDueLabel(dueDate: string, showRelative: boolean, now: Date = new Date()): string {
+  const { base, relative } = jobDueParts(dueDate, showRelative, now);
+  return relative ? `${base} (${relative})` : base;
+}
+
+/* ------------------------------------------------------------------ */
+/* Labor week status (next week wording, draft notice)                 */
+/* ------------------------------------------------------------------ */
+
+export type WeekStatus = { exists: boolean; isPublished: boolean };
+
+/** Empty-state line under "Next week": only a published week can say there is nothing for you. */
+export function nextWeekMessage(status: WeekStatus, jobCount: number): string | null {
+  if (jobCount > 0) return null;
+  return status.exists && status.isPublished ? "No jobs for you next week." : "Nothing posted for next week yet.";
+}
+
+/** Officer panel line for a week that is missing or still a draft; null when it is published. */
+export function laborWeekNotice(status: WeekStatus, weekStart: string): { text: string; href: string } | null {
+  if (!status.exists) return { text: "No week posted yet", href: "/labor" };
+  if (!status.isPublished) return { text: `Week of ${formatDate(weekStart)} is a draft, publish it`, href: "/labor?manage=1" };
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Contact details                                                     */
+/* ------------------------------------------------------------------ */
+
+export type ContactField = "phone" | "email";
+
+/** Which of phone and email a member has not filled in (blank or whitespace counts as missing). */
+export function missingContactFields(member: { phone: string | null | undefined; email: string | null | undefined }): ContactField[] {
+  const out: ContactField[] = [];
+  if (!member.phone?.trim()) out.push("phone");
+  if (!member.email?.trim()) out.push("email");
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Board tasks                                                         */
+/* ------------------------------------------------------------------ */
+
+/** Open tasks with nobody assigned on the boards of the chairs the viewer holds. */
+export function unassignedOnBoards<T extends { chairId: number | null; assignees: readonly unknown[] }>(tasks: readonly T[], chairIds: readonly number[]): T[] {
+  if (chairIds.length === 0) return [];
+  return tasks.filter((t) => t.chairId != null && chairIds.includes(t.chairId) && t.assignees.length === 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Waiting on you                                                      */
+/* ------------------------------------------------------------------ */
+
+export const WAITING_WINDOW_DAYS = 7;
+
+/** True when the instant lies in the last `days` days, up to and including now. */
+export function withinLastDays(iso: string | null | undefined, now: Date, days = WAITING_WINDOW_DAYS): boolean {
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return false;
+  return t <= now.getTime() && t >= now.getTime() - days * 86_400_000;
+}
+
+export type WaitingSwap = {
+  id: number;
+  status: "pending" | "accepted" | "declined" | "approved" | "cancelled";
+  requestedById: number;
+  targetMemberId: number | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  jobName: string;
+  weekStart: string;
+  requesterName: string;
+  /** False once the job is done, missed or excused (nothing left to claim). */
+  jobOpen: boolean;
+};
+export type WaitingExcuse = { id: number; status: "pending" | "approved" | "denied"; reviewedAt: string | null; jobName: string; weekStart: string };
+export type WaitingSanction = { id: number; reason: string; status: string; issuedAt: string; dueAt: string | null };
+export type WaitingTask = { id: number; title: string; assignedAt: string; dueAt: string | null };
+export type WaitingDuty = { id: number; eventId: number; eventTitle: string; duty: string; label: string | null; startsAt: string };
+
+export type WaitingInput = {
+  memberId: number;
+  /** Only brothers in the labor pool can claim an open swap. */
+  inLaborPool: boolean;
+  swaps: WaitingSwap[];
+  excuses: WaitingExcuse[];
+  /** Sanctions issued to the member (any status); the window filter is applied here. */
+  sanctions: WaitingSanction[];
+  /** Open tasks assigned to the member with when they were assigned. */
+  tasks: WaitingTask[];
+  /** Unfinished duties at events this week. */
+  duties: WaitingDuty[];
+};
+
+export type WaitingKind = "swap_for_me" | "swap_open" | "swap_decided" | "excuse_decided" | "sanction" | "task" | "duty";
+export type WaitingTone = "warning" | "danger" | "info" | "success" | "neutral";
+export type WaitingItem = { key: string; kind: WaitingKind; title: string; detail: string; href: string; tone: WaitingTone };
+
+const weekOf = (weekStart: string) => `week of ${formatDate(weekStart)}`;
+
+/**
+ * Everything that needs the brother's attention or just happened to them, grouped: things to act on
+ * first (swaps asked of them, open swaps, duties, new tasks), then news (sanctions, decisions).
+ */
+export function buildWaitingItems(input: WaitingInput, now: Date = new Date()): WaitingItem[] {
+  const me = input.memberId;
+  const items: WaitingItem[] = [];
+
+  for (const s of input.swaps) {
+    if (s.status !== "pending" || s.requestedById === me || !s.jobOpen) continue;
+    if (s.targetMemberId === me) {
+      items.push({ key: `swap-${s.id}`, kind: "swap_for_me", title: `${s.requesterName} asked you to take ${s.jobName}`, detail: `${weekOf(s.weekStart)} · accept or decline on Swaps`, href: "/labor/swaps", tone: "warning" });
+    } else if (s.targetMemberId == null && input.inLaborPool) {
+      items.push({ key: `swap-${s.id}`, kind: "swap_open", title: `${s.requesterName} needs someone to take ${s.jobName}`, detail: `${weekOf(s.weekStart)} · open to anyone, claim it on Swaps`, href: "/labor/swaps", tone: "info" });
+    }
+  }
+
+  for (const d of input.duties) {
+    items.push({ key: `duty-${d.id}`, kind: "duty", title: `${d.label ?? humanize(d.duty)} at ${d.eventTitle}`, detail: `Event duty this week · ${formatDateTime(d.startsAt)}`, href: `/events/${d.eventId}`, tone: "info" });
+  }
+
+  for (const t of input.tasks) {
+    if (!withinLastDays(t.assignedAt, now)) continue;
+    const due = t.dueAt ? `${formatDate(t.dueAt)} (${dueDescription(t.dueAt, now)})` : "no due date";
+    items.push({ key: `task-${t.id}`, kind: "task", title: `New task: ${t.title}`, detail: `Assigned to you ${formatDate(t.assignedAt)} · ${due}`, href: `/tasks/${t.id}`, tone: "info" });
+  }
+
+  for (const s of input.sanctions) {
+    if (!withinLastDays(s.issuedAt, now)) continue;
+    const due = s.dueAt ? `due ${formatDateTime(s.dueAt)}` : "no due date";
+    items.push({ key: `sanction-${s.id}`, kind: "sanction", title: `Sanction issued: ${s.reason}`, detail: `${formatDate(s.issuedAt)} · ${due} · ${humanize(s.status)}`, href: `/sanctions/${s.id}`, tone: "danger" });
+  }
+
+  for (const s of input.swaps) {
+    if (s.requestedById !== me || (s.status !== "approved" && s.status !== "declined") || !withinLastDays(s.resolvedAt, now)) continue;
+    items.push({ key: `swap-decided-${s.id}`, kind: "swap_decided", title: `Your swap request for ${s.jobName} was ${s.status}`, detail: `${weekOf(s.weekStart)} · ${formatDate(s.resolvedAt)}`, href: "/labor/me", tone: s.status === "approved" ? "success" : "danger" });
+  }
+
+  for (const e of input.excuses) {
+    if ((e.status !== "approved" && e.status !== "denied") || !withinLastDays(e.reviewedAt, now)) continue;
+    items.push({ key: `excuse-${e.id}`, kind: "excuse_decided", title: `Your excuse for ${e.jobName} was ${e.status}`, detail: `${weekOf(e.weekStart)} · ${formatDate(e.reviewedAt)}`, href: "/labor/me", tone: e.status === "approved" ? "success" : "danger" });
+  }
+
+  return items;
 }
 
 /* ------------------------------------------------------------------ */

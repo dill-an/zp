@@ -145,7 +145,7 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
                                 </SubmitButton>
                               </ActionForm>
                             ) : null}
-                            <MarkMissedDialog assignmentId={a.id} memberName={displayName(a.member)} jobName={row.jobType.name} fineCents={fineCents} hidden={a.status === "missed"} />
+                            <MarkMissedDialog assignmentId={a.id} memberName={displayName(a.member)} jobName={row.jobType.name} dueDate={row.dueDate} today={ctx.today} fineCents={fineCents} hidden={a.status === "missed"} />
                             {a.status !== "excused" ? (
                               <ActionForm action={markExcused} hidden={{ assignmentId: a.id }}>
                                 <SubmitButton size="sm" variant="outline" pendingText="Saving…">

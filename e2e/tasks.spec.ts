@@ -262,6 +262,70 @@ test("chair filter narrows every tab", async ({ page }) => {
   await expect(page.getByRole("link", { name: rush })).toHaveCount(0);
 });
 
+test("a chair holder sees unowned tasks on their boards in the Mine tab, counted apart from their assignments", async ({ page }) => {
+  page.on("dialog", (d) => d.accept());
+  const boardTitle = uniq("Board task");
+  const ownedTitle = uniq("Owned task");
+  await login(page, ADMIN);
+
+  // Martin becomes the Historian (a chair without tasks.manage_all) unless a previous run left him there.
+  await page.goto("/chairs/historian");
+  const holders = page.locator("[data-testid=current-holders]");
+  if ((await holders.getByText(CLEANER.name).count()) === 0) {
+    await page.getByRole("button", { name: "Assign holder" }).click();
+    await page.selectOption("dialog[open] #memberId", { label: CLEANER.name });
+    await page.click("dialog[open] button[type=submit]");
+    await expect(holders.getByText(CLEANER.name)).toBeVisible();
+  }
+
+  // One task on his board with nobody on it, one owned by Gio: only the first belongs under "On my boards".
+  await page.goto("/tasks/new");
+  const historianId = await page.locator("#chairId option", { hasText: "Historian" }).getAttribute("value");
+  await fillTaskForm(page, { title: boardTitle, chair: "Historian", due: "2026-11-12T18:00" });
+  await submitTaskForm(page);
+  await page.goto("/tasks/new");
+  await fillTaskForm(page, { title: ownedTitle, chair: "Historian", assignees: [BROTHER.name] });
+  await submitTaskForm(page);
+  await logout(page);
+
+  await login(page, CLEANER);
+  await page.goto("/tasks");
+  await expect(page.getByTestId("mine-counts")).toHaveText(/^\d+ assigned · \d+ on my boards$/);
+  const boards = page.getByTestId("my-boards");
+  await expect(boards.getByRole("heading", { name: "On my boards (unassigned)" })).toBeVisible();
+  await expect(boards.getByRole("link", { name: boardTitle })).toBeVisible();
+  // Not in the assigned list above the section, and the owned task is nowhere on Mine.
+  await expect(page.getByRole("link", { name: boardTitle })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: ownedTitle })).toHaveCount(0);
+
+  // The chair filter narrows the section too; the General bucket never sits on a board.
+  await page.goto(`/tasks?tab=mine&chair=${historianId}`);
+  await expect(page.getByTestId("my-boards").getByRole("link", { name: boardTitle })).toBeVisible();
+  await page.goto("/tasks?tab=mine&chair=general");
+  await expect(page.getByTestId("my-boards")).toContainText("Nothing unassigned matches these filters");
+
+  // As the chair holder he can finish it straight from the section.
+  await page.goto("/tasks");
+  await boards.getByRole("button", { name: `Mark "${boardTitle}" done` }).click();
+  await expect(boards.getByRole("link", { name: boardTitle })).toHaveCount(0, { timeout: 30_000 });
+  await logout(page);
+
+  // A brother with no chair gets neither the section nor the split counts.
+  await login(page, BROTHER);
+  await page.goto("/tasks");
+  await expect(page.getByTestId("task-cards").first()).toBeAttached();
+  await expect(page.getByTestId("my-boards")).toHaveCount(0);
+  await expect(page.getByTestId("mine-counts")).toHaveCount(0);
+  await logout(page);
+
+  // Leave the chair as we found it.
+  await login(page, ADMIN);
+  await page.goto("/chairs/historian");
+  await holders.locator("li", { hasText: CLEANER.name }).getByRole("button", { name: "End term" }).click();
+  await page.waitForURL(/\/chairs\/historian\?ok=/);
+  await expect(holders.getByText(CLEANER.name)).toHaveCount(0);
+});
+
 test("mobile viewport renders the list as cards with a working quick Done", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const title = uniq("Phone task");

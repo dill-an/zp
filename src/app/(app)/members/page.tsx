@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { listPledgeClasses } from "@/lib/queries/common";
-import { searchMembers, summarizeRoster } from "@/lib/queries/members";
+import { listMembersMissingClass, searchMembers, summarizeRoster } from "@/lib/queries/members";
 import { formatRosterSummary, parseRosterParams, rosterParamsToQuery } from "@/lib/queries/members-logic";
 import { MemberLink } from "@/components/member-link";
 import { Avatar } from "@/components/ui/avatar";
@@ -29,6 +29,7 @@ export default async function MembersPage({ searchParams }: { searchParams: Prom
   const summary = summarizeRoster(rows);
   const query = rosterParamsToQuery(params);
   const hasFilters = query.length > 0;
+  const missingClass = canManage ? listMembersMissingClass() : [];
 
   return (
     <>
@@ -51,6 +52,24 @@ export default async function MembersPage({ searchParams }: { searchParams: Prom
           ) : null
         }
       />
+
+      {missingClass.length > 0 ? (
+        <div role="status" data-testid="roster-hygiene" className="mb-4 rounded-lg border border-border bg-warning-soft px-4 py-3 text-sm">
+          <p className="font-medium">
+            {missingClass.length === 1 ? "1 brother has no pledge class" : `${missingClass.length} brothers have no pledge class`}
+          </p>
+          <p className="mt-0.5 text-muted">They show as No class on the roster and are left out of the class counts. Set it from their edit page.</p>
+          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {missingClass.map((m) => (
+              <li key={m.id}>
+                <Link href={`/members/${m.id}/edit`} className="font-medium hover:underline">
+                  {displayName(m)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <RosterFilters key={query} params={params} pledgeClasses={pledgeClasses} hasFilters={hasFilters} />
 
@@ -79,7 +98,7 @@ export default async function MembersPage({ searchParams }: { searchParams: Prom
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <MemberLink member={m} className="text-base" />
-                      {m.pledgeClass ? <span className="text-xs text-muted">{m.pledgeClass.name}</span> : null}
+                      {m.pledgeClass ? <span className="text-xs text-muted">{m.pledgeClass.name}</span> : <Badge tone="neutral">No class</Badge>}
                     </div>
                     <p className="truncate text-xs text-muted">@{m.username}</p>
                     <div className="mt-1.5 flex flex-wrap gap-1">
@@ -139,7 +158,7 @@ export default async function MembersPage({ searchParams }: { searchParams: Prom
                       </div>
                       <p className="pl-9 text-xs text-muted">@{m.username}</p>
                     </Td>
-                    <Td className="whitespace-nowrap">{m.pledgeClass?.name ?? <span className="text-muted">None</span>}</Td>
+                    <Td className="whitespace-nowrap">{m.pledgeClass?.name ?? <Badge tone="neutral">No class</Badge>}</Td>
                     <Td>
                       <StatusPill status={m.status} />
                     </Td>

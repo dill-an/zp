@@ -109,6 +109,46 @@ test.describe("roster", () => {
   });
 });
 
+test.describe("roster hygiene", () => {
+  test("members.manage sees who has no pledge class, with a link to fix it; the roster marks them with a pill", async ({ page }) => {
+    await login(page, ADMIN);
+    const t = tag("nc");
+    // createMember picks no pledge class.
+    const m = await createMember(page, t);
+
+    await page.goto(`/members?q=${t}`);
+    const table = page.locator("[data-testid=roster-table]");
+    await expect(table.locator("tr", { hasText: m.name }).getByText("No class", { exact: true })).toBeVisible();
+    const notice = page.locator("[data-testid=roster-hygiene]");
+    await expect(notice).toContainText("no pledge class");
+    await expect(notice.getByRole("link", { name: m.name })).toHaveAttribute("href", `/members/${m.id}/edit`);
+
+    // The phone card carries the same pill.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const cards = page.locator("[data-testid=roster-cards]");
+    await expect(cards.locator("li", { hasText: m.name }).getByText("No class", { exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 900 });
+
+    // Fix it from the notice: the link opens the edit page, and afterwards the brother drops out of the list.
+    await notice.getByRole("link", { name: m.name }).click();
+    await page.waitForURL(new RegExp(`/members/${m.id}/edit`));
+    await page.selectOption("#pledgeClassId", { label: "Beta Beta" });
+    await page.click("main form button[type=submit]");
+    await page.waitForURL(/\/members\/\d+\?saved=1/);
+    await page.goto(`/members?q=${t}`);
+    await expect(table.locator("tr", { hasText: m.name })).toContainText("Beta Beta");
+    await expect(table.getByText("No class", { exact: true })).toHaveCount(0);
+    await expect(page.locator("[data-testid=roster-hygiene]").getByRole("link", { name: m.name })).toHaveCount(0);
+    await logout(page);
+
+    // A plain brother sees the pill on the roster but never the hygiene notice.
+    await login(page, BROTHER);
+    await page.goto("/members");
+    await expect(page.locator("[data-testid=roster-table]")).toBeVisible();
+    await expect(page.locator("[data-testid=roster-hygiene]")).toHaveCount(0);
+  });
+});
+
 test.describe("members: admin flows", () => {
   test("admin adds a member and the new member logs in with the temporary password", async ({ page }) => {
     await login(page, ADMIN);

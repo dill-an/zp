@@ -3,7 +3,7 @@
  * No database access, so everything here is unit tested in labor-logic.test.ts.
  */
 import type { AssignmentStatus, JobKind, LaborGroup } from "@/db/schema";
-import { addDaysISO, dayOfWeek } from "@/lib/dates";
+import { addDaysISO, dayOfWeek, formatDate } from "@/lib/dates";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -218,16 +218,27 @@ export type AutoFillInput = {
   pool: PoolMember[];
   /** Semester points already carried by each member (memberId -> points). */
   loads: Record<number, number> | Map<number, number>;
+  /** Most jobs one brother gets in the week before the rest of the pool is considered exhausted. */
+  cap?: number;
 };
 
 export type AutoFillPick = { jobTypeId: number; memberId: number; slot: number };
 
+/** Default per-week cap: nobody gets a third job while someone else is still under two. */
+export const AUTO_FILL_WEEK_CAP = 2;
+
 /**
- * Fill every empty slot deterministically: lowest semester points first, then fewest jobs this
- * week, then lowest id. Never the same brother twice in one job type for the week. Cleans-group
- * brothers are preferred for `clean` jobs and cooks for `cook` jobs when any are available.
+ * Fill every empty slot deterministically. Candidates are ranked by jobs already assigned this
+ * week (existing rows count), then semester points, then lowest id, so the load spreads across the
+ * week before it spreads across the semester. Never the same brother twice in one job type.
+ *
+ * The labor group is a soft preference: cleans-group brothers are tried first for `clean` jobs and
+ * cooks for `cook` jobs, but only while they are under the per-week cap; once the matching group is
+ * at the cap (or all of them already hold a slot on this job) the slot opens to the whole pool.
+ * Only when everyone is at the cap is it lifted, so a tiny pool still fills every slot.
  */
 export function autoFill(input: AutoFillInput): AutoFillPick[] {
+  const cap = Math.max(1, input.cap ?? AUTO_FILL_WEEK_CAP);
   const loadOf = (id: number): number => {
     const v = input.loads instanceof Map ? input.loads.get(id) : input.loads[id];
     return v ?? 0;
@@ -239,10 +250,11 @@ export function autoFill(input: AutoFillInput): AutoFillPick[] {
     points.set(m.id, loadOf(m.id));
     weekJobs.set(m.id, 0);
   }
+  const jobsOf = (id: number) => weekJobs.get(id) ?? 0;
   const taken = new Map<number, Map<number, number>>(); // jobTypeId -> slot -> memberId
   for (const a of input.existing) {
     (taken.get(a.jobTypeId) ?? taken.set(a.jobTypeId, new Map()).get(a.jobTypeId)!).set(a.slot, a.memberId);
-    if (weekJobs.has(a.memberId)) weekJobs.set(a.memberId, (weekJobs.get(a.memberId) ?? 0) + 1);
+    if (weekJobs.has(a.memberId)) weekJobs.set(a.memberId, jobsOf(a.memberId) + 1);
   }
 
   const picks: AutoFillPick[] = [];
@@ -253,16 +265,13 @@ export function autoFill(input: AutoFillInput): AutoFillPick[] {
     for (let slot = 1; slot <= Math.max(1, jt.slots); slot++) {
       if (slotMap.has(slot)) continue;
       const already = new Set(slotMap.values());
-      let candidates = pool.filter((m) => !already.has(m.id));
-      if (preferredGroup) {
-        const preferred = candidates.filter((m) => m.laborGroup === preferredGroup);
-        if (preferred.length) candidates = preferred;
-      }
+      const eligible = pool.filter((m) => !already.has(m.id));
+      const underCap = eligible.filter((m) => jobsOf(m.id) < cap);
+      const preferredUnderCap = preferredGroup ? underCap.filter((m) => m.laborGroup === preferredGroup) : [];
+      // Tiers: matching group under the cap, anyone under the cap, then (pool exhausted) anyone at all.
+      const candidates = preferredUnderCap.length ? preferredUnderCap : underCap.length ? underCap : eligible;
       if (!candidates.length) continue;
-      candidates.sort(
-        (a, b) =>
-          (points.get(a.id) ?? 0) - (points.get(b.id) ?? 0) || (weekJobs.get(a.id) ?? 0) - (weekJobs.get(b.id) ?? 0) || a.id - b.id,
-      );
+      candidates.sort((a, b) => jobsOf(a.id) - jobsOf(b.id) || (points.get(a.id) ?? 0) - (points.get(b.id) ?? 0) || a.id - b.id);
       const chosen = candidates[0];
       slotMap.set(slot, chosen.id);
       taken.set(jt.id, slotMap);
@@ -278,16 +287,30 @@ export function autoFill(input: AutoFillInput): AutoFillPick[] {
 /* Fairness stats                                                      */
 /* ------------------------------------------------------------------ */
 
-export type StatsAssignment = Pick<AssignmentLike, "jobTypeId" | "memberId" | "status" | "verifiedAt">;
+export type StatsAssignment = Pick<AssignmentLike, "jobTypeId" | "memberId" | "status" | "verifiedAt"> & {
+  /** The week's Sunday; needed to tell untracked history apart (see `StatsOptions.trackingStart`). */
+  weekStart?: string;
+};
 export type StatsMember = { id: number; laborGroup: LaborGroup; firstName: string; lastName: string; preferredName: string };
+
+/** Which part of the pool the median, the below-median flag and the threshold list are measured against. */
+export type StatsScope = "all" | "cleans" | "cooks";
+
+export type StatsOptions = {
+  scope?: StatsScope;
+  /** Open assignments in weeks before this date are "not tracked": they never count as pending, done or missed. */
+  trackingStart?: string | null;
+};
 
 export type MemberStat = {
   memberId: number;
   laborGroup: LaborGroup;
   /** Every assignment regardless of status. */
   assigned: number;
-  /** Still open (status assigned). */
+  /** Still open (status assigned) in a tracked week. */
   pending: number;
+  /** Open assignments from before tracking started: credit for the job, but no verdict either way. */
+  notTracked: number;
   done: number;
   verified: number;
   missed: number;
@@ -296,6 +319,9 @@ export type MemberStat = {
   jobs: number;
   /** Points for assigned or done jobs. */
   points: number;
+  /** Share of resolved tracked jobs (done or missed) that were done, 0-100; null until one is resolved. */
+  donePct: number | null;
+  /** Below the median points of the stats' scope (only ever true for pool members inside that scope). */
   belowMedian: boolean;
 };
 
@@ -314,10 +340,18 @@ export type LaborStats = {
   perMember: MemberStat[];
   perJobType: JobTypeStat[];
   groups: GroupStat[];
+  scope: StatsScope;
+  /** Median over pool members inside `scope`. */
   medianPoints: number;
   medianJobs: number;
-  totals: { assignments: number; done: number; missed: number; excused: number; points: number };
+  totals: { assignments: number; done: number; missed: number; excused: number; notTracked: number; points: number };
 };
+
+/** Share of resolved jobs that were done, as a whole percentage; null when nothing has been resolved yet. */
+export function donePercent(done: number, missed: number): number | null {
+  const resolved = done + missed;
+  return resolved ? Math.round((done / resolved) * 100) : null;
+}
 
 export function median(values: number[]): number {
   if (!values.length) return 0;
@@ -326,8 +360,15 @@ export function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-/** Totals per member and per job type. `members` is the labor pool; others with assignments are added. */
-export function laborStats(assignments: StatsAssignment[], jobTypes: Pick<JobTypeLike, "id" | "name" | "points">[], members: StatsMember[]): LaborStats {
+/**
+ * Totals per member and per job type. `members` is the labor pool; others with assignments are added.
+ * With `trackingStart`, open assignments in earlier weeks are counted as `notTracked` instead of pending
+ * (they still earn job credit and points). With `scope`, the median and the below-median flag cover only
+ * that labor group, so cooks are measured against cooks and cleans against cleans.
+ */
+export function laborStats(assignments: StatsAssignment[], jobTypes: Pick<JobTypeLike, "id" | "name" | "points">[], members: StatsMember[], opts: StatsOptions = {}): LaborStats {
+  const scope: StatsScope = opts.scope ?? "all";
+  const trackingStart = opts.trackingStart || null;
   const jobTypeById = new Map(jobTypes.map((jt) => [jt.id, jt]));
   const perMember = new Map<number, MemberStat>();
   const blank = (memberId: number, laborGroup: LaborGroup): MemberStat => ({
@@ -335,12 +376,14 @@ export function laborStats(assignments: StatsAssignment[], jobTypes: Pick<JobTyp
     laborGroup,
     assigned: 0,
     pending: 0,
+    notTracked: 0,
     done: 0,
     verified: 0,
     missed: 0,
     excused: 0,
     jobs: 0,
     points: 0,
+    donePct: null,
     belowMedian: false,
   });
   for (const m of members) perMember.set(m.id, blank(m.id, m.laborGroup));
@@ -348,7 +391,7 @@ export function laborStats(assignments: StatsAssignment[], jobTypes: Pick<JobTyp
   const perJob = new Map<number, JobTypeStat & { counts: Map<number, number> }>();
   for (const jt of jobTypes) perJob.set(jt.id, { jobTypeId: jt.id, name: jt.name, total: 0, done: 0, missed: 0, byMember: [], counts: new Map() });
 
-  const totals = { assignments: 0, done: 0, missed: 0, excused: 0, points: 0 };
+  const totals = { assignments: 0, done: 0, missed: 0, excused: 0, notTracked: 0, points: 0 };
   for (const a of assignments) {
     const jt = jobTypeById.get(a.jobTypeId);
     const pts = jt?.points ?? 1;
@@ -365,6 +408,9 @@ export function laborStats(assignments: StatsAssignment[], jobTypes: Pick<JobTyp
     } else if (a.status === "excused") {
       ms.excused += 1;
       totals.excused += 1;
+    } else if (trackingStart && a.weekStart && a.weekStart < trackingStart) {
+      ms.notTracked += 1;
+      totals.notTracked += 1;
     } else {
       ms.pending += 1;
     }
@@ -384,9 +430,14 @@ export function laborStats(assignments: StatsAssignment[], jobTypes: Pick<JobTyp
 
   const poolIds = new Set(members.map((m) => m.id));
   const poolStats = [...perMember.values()].filter((s) => poolIds.has(s.memberId));
-  const medianPoints = median(poolStats.map((s) => s.points));
-  const medianJobs = median(poolStats.map((s) => s.jobs));
-  for (const s of perMember.values()) s.belowMedian = s.points < medianPoints;
+  const inScope = (s: MemberStat) => poolIds.has(s.memberId) && (scope === "all" || s.laborGroup === scope);
+  const scoped = poolStats.filter(inScope);
+  const medianPoints = median(scoped.map((s) => s.points));
+  const medianJobs = median(scoped.map((s) => s.jobs));
+  for (const s of perMember.values()) {
+    s.donePct = donePercent(s.done, s.missed);
+    s.belowMedian = inScope(s) && s.points < medianPoints;
+  }
 
   const groups: GroupStat[] = (["cleans", "cooks"] as LaborGroup[]).map((group) => {
     const rows = poolStats.filter((s) => s.laborGroup === group);
@@ -415,15 +466,22 @@ export function laborStats(assignments: StatsAssignment[], jobTypes: Pick<JobTyp
     perMember: [...perMember.values()].sort((a, b) => a.points - b.points || a.jobs - b.jobs || a.memberId - b.memberId),
     perJobType,
     groups,
+    scope,
     medianPoints,
     medianJobs,
     totals,
   };
 }
 
-/** Members with fewer credited jobs than `min` (the sheet's "brothers who have not cleaned twice"). */
-export function belowThreshold(stats: Pick<LaborStats, "perMember">, min: number): MemberStat[] {
-  return stats.perMember.filter((s) => s.jobs < min).sort((a, b) => a.jobs - b.jobs || a.memberId - b.memberId);
+/**
+ * Members with fewer credited jobs than `min` (the sheet's "brothers who have not cleaned twice"),
+ * limited to the stats' scope when it names one labor group.
+ */
+export function belowThreshold(stats: Pick<LaborStats, "perMember"> & { scope?: StatsScope }, min: number): MemberStat[] {
+  const scope = stats.scope ?? "all";
+  return stats.perMember
+    .filter((s) => s.jobs < min && (scope === "all" || s.laborGroup === scope))
+    .sort((a, b) => a.jobs - b.jobs || a.memberId - b.memberId);
 }
 
 /** Points carried by each member, in the shape `autoFill` expects as `loads`. */
@@ -431,6 +489,48 @@ export function loadsFromStats(stats: Pick<LaborStats, "perMember">): Record<num
   const out: Record<number, number> = {};
   for (const s of stats.perMember) out[s.memberId] = s.points;
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Plain text for the group chat                                       */
+/* ------------------------------------------------------------------ */
+
+export type ScheduleTextRow = { name: string; windowLabel?: string | null; names: (string | null)[] };
+export type ScheduleTextGroup = { label: string; rows: ScheduleTextRow[] };
+
+/** "Upstairs Commons (Mon-Wed)" but plain "Monday Kitchen", whose name already says the day. */
+export function jobTextLabel(name: string, windowLabel?: string | null): string {
+  const w = windowLabel?.trim();
+  if (!w) return name;
+  return shortJobName(name).toLowerCase().includes(w.toLowerCase()) ? name : `${name} (${w})`;
+}
+
+/**
+ * The week's schedule as plain text grouped by category, one job per line, for pasting into the
+ * house group chat. Empty slots read "open"; week notes close the message.
+ */
+export function scheduleText(input: { weekStart: string; groups: ScheduleTextGroup[]; notes?: string | null }): string {
+  const blocks: string[] = [`Jobs for the week of ${formatDate(input.weekStart)}`];
+  for (const g of input.groups) {
+    if (!g.rows.length) continue;
+    const lines = g.rows.map((r) => `${jobTextLabel(r.name, r.windowLabel)}: ${r.names.map((n) => n?.trim() || "open").join(", ")}`);
+    blocks.push([g.label, ...lines].join("\n"));
+  }
+  const notes = input.notes?.trim();
+  if (notes) blocks.push(`Notes: ${notes}`);
+  return blocks.join("\n\n");
+}
+
+export type MyJobsTextSection = { label: string; jobs: { name: string; windowLabel?: string | null; dueDate: string }[] };
+
+/** One brother's jobs as plain text: a heading, then one section per week with a line per job. */
+export function myJobsText(input: { title: string; sections: MyJobsTextSection[] }): string {
+  const blocks: string[] = [input.title];
+  for (const s of input.sections) {
+    const lines = s.jobs.length ? s.jobs.map((j) => `- ${jobTextLabel(j.name, j.windowLabel)}, due ${formatDate(j.dueDate, { weekday: true })}`) : ["- nothing assigned"];
+    blocks.push([s.label, ...lines].join("\n"));
+  }
+  return blocks.join("\n\n");
 }
 
 /* ------------------------------------------------------------------ */

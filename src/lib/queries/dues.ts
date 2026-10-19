@@ -18,10 +18,14 @@ import { getMember, listMembers, type MemberWithClass } from "./common";
 import {
   buildLedger,
   computeBalance,
+  dueItemsFor,
+  inPeriod,
   memberStatus,
   nextInstallment,
   overallStatus,
   parseInstallmentsJson,
+  sortDueItems,
+  type DueItem,
   type DuesStatus,
   type Installment,
   type LedgerEntry,
@@ -146,6 +150,34 @@ export function getMemberBalance(memberId: number, periodId?: number | null): Me
   const memberCharges = db.select().from(charges).where(eq(charges.memberId, memberId)).all();
   const memberPayments = db.select().from(payments).where(eq(payments.memberId, memberId)).all();
   return balanceFor(memberCharges, memberPayments, approvedPlansFor([memberId]), periodId, todayISO());
+}
+
+/**
+ * What a brother still has to pay, soonest due first: the leftover on each unpaid charge (payments and credits applied
+ * in due-date order within each period), or the next installment where an approved plan covers the period.
+ */
+export function getMemberDueItems(memberId: number): DueItem[] {
+  const today = todayISO();
+  const memberCharges = db.select().from(charges).where(eq(charges.memberId, memberId)).all();
+  const memberPayments = db.select().from(payments).where(eq(payments.memberId, memberId)).all();
+  const plans = approvedPlansFor([memberId]);
+  const periodNames = new Map(db.select({ id: duesPeriods.id, name: duesPeriods.name }).from(duesPeriods).all().map((p) => [p.id, p.name]));
+  const items: DueItem[] = [];
+  for (const scope of scopesOf(memberCharges, memberPayments)) {
+    const scopedCharges = memberCharges.filter((c) => inPeriod(c, scope));
+    const scopedPayments = memberPayments.filter((p) => inPeriod(p, scope));
+    const b = computeBalance(scopedCharges, scopedPayments, scope);
+    if (b.balanceCents <= 0) continue;
+    const plan = plans.find((p) => (p.periodId ?? null) === scope);
+    const next = plan ? nextInstallment(plan.installments, planPaidCents(plan, memberPayments), today) : null;
+    if (next) {
+      const name = scope == null ? null : periodNames.get(scope);
+      items.push({ kind: "plan", label: `${name ? `${name} ` : ""}plan installment`, dueDate: next.dueDate, remainingCents: next.remainingCents, periodId: scope });
+      continue;
+    }
+    items.push(...dueItemsFor(scopedCharges, b.paidCents));
+  }
+  return sortDueItems(items);
 }
 
 export type BalanceRow = MemberBalance & {

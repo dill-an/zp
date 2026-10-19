@@ -29,6 +29,7 @@ import {
   type AssignmentState,
   type LaborStats,
   type MemberStat,
+  type StatsScope,
 } from "@/lib/queries/labor-logic";
 
 /* ------------------------------------------------------------------ */
@@ -175,6 +176,12 @@ export function getWeek(weekStart: string): LaborWeek | null {
 
 export function getWeekById(id: number): LaborWeek | null {
   return db.select().from(laborWeeks).where(eq(laborWeeks.id, id)).get() ?? null;
+}
+
+/** Whether a week exists and is posted (for "this week is still a draft" notices elsewhere in the app). */
+export function getWeekStatus(weekStart: string): { exists: boolean; isPublished: boolean } {
+  const week = getWeek(weekStart);
+  return { exists: !!week, isPublished: !!week?.isPublished };
 }
 
 /** The most recent week that starts before `weekStart` (source for "Copy last week"). */
@@ -336,15 +343,21 @@ export type LaborStatsReport = LaborStats & {
   belowThreshold: (min: number) => MemberStat[];
 };
 
-/** Semester fairness stats over published weeks (all weeks when `includeUnpublished`). */
-export function getLaborStats(opts: { includeUnpublished?: boolean } = {}): LaborStatsReport {
+/**
+ * Semester fairness stats over published weeks (all weeks when `includeUnpublished`). Open jobs from
+ * weeks before `labor_tracking_start` are reported as "not tracked" rather than pending; `scope` limits
+ * the median, the below-median flag and the threshold list to one labor group (default: the whole pool).
+ */
+export function getLaborStats(opts: { includeUnpublished?: boolean; scope?: StatsScope } = {}): LaborStatsReport {
+  const ctx = getLaborContext();
   const pool = getLaborPool();
   const types = listJobTypes({ includeInactive: true });
   const assignments = allAssignments(opts);
   const stats = laborStats(
-    assignments.map((a) => ({ jobTypeId: a.jobTypeId, memberId: a.memberId, status: a.status, verifiedAt: a.verifiedAt })),
+    assignments.map((a) => ({ jobTypeId: a.jobTypeId, memberId: a.memberId, status: a.status, verifiedAt: a.verifiedAt, weekStart: a.weekStart })),
     types,
     pool.map((m) => ({ id: m.id, laborGroup: m.laborGroup, firstName: m.firstName, lastName: m.lastName, preferredName: m.preferredName })),
+    { scope: opts.scope ?? "all", trackingStart: ctx.trackingStart },
   );
   const memberMap = new Map<number, MemberLite>();
   for (const m of pool) memberMap.set(m.id, { id: m.id, firstName: m.firstName, lastName: m.lastName, preferredName: m.preferredName, username: m.username, laborGroup: m.laborGroup, status: m.status });
@@ -352,28 +365,43 @@ export function getLaborStats(opts: { includeUnpublished?: boolean } = {}): Labo
   return { ...stats, members: memberMap, jobTypes: types, pool, belowThreshold: (min) => belowThreshold(stats, min) };
 }
 
-export type MemberLaborStats = MemberStat & { medianPoints: number; medianJobs: number; poolSize: number; rank: number };
+export type MemberLaborStats = MemberStat & {
+  /** The group the median, rank and pool size are measured within: the brother's own labor group, or the whole pool. */
+  scope: StatsScope;
+  medianPoints: number;
+  medianJobs: number;
+  poolSize: number;
+  rank: number;
+};
 
-/** One brother's totals plus where they sit against the pool median. */
+/**
+ * One brother's totals plus where they sit against the median of their own labor group (cooks are
+ * measured against cooks, cleans against cleans; a brother outside the pool against everyone).
+ * Open jobs from before tracking started are counted as `notTracked`, not pending.
+ */
 export function getMemberLaborStats(memberId: number): MemberLaborStats {
-  const stats = getLaborStats();
+  const me = db.select({ laborGroup: members.laborGroup }).from(members).where(eq(members.id, memberId)).get();
+  const scope: StatsScope = me?.laborGroup === "cooks" || me?.laborGroup === "cleans" ? me.laborGroup : "all";
+  const stats = getLaborStats({ scope });
   const mine = stats.perMember.find((s) => s.memberId === memberId) ?? {
     memberId,
     laborGroup: "none" as const,
     assigned: 0,
     pending: 0,
+    notTracked: 0,
     done: 0,
     verified: 0,
     missed: 0,
     excused: 0,
     jobs: 0,
     points: 0,
-    belowMedian: stats.medianPoints > 0,
+    donePct: null,
+    belowMedian: false,
   };
-  const poolIds = new Set(stats.pool.map((m) => m.id));
-  const ranked = stats.perMember.filter((s) => poolIds.has(s.memberId)).sort((a, b) => b.points - a.points || b.jobs - a.jobs || a.memberId - b.memberId);
+  const inScope = new Set(stats.pool.filter((m) => scope === "all" || m.laborGroup === scope).map((m) => m.id));
+  const ranked = stats.perMember.filter((s) => inScope.has(s.memberId)).sort((a, b) => b.points - a.points || b.jobs - a.jobs || a.memberId - b.memberId);
   const rank = ranked.findIndex((s) => s.memberId === memberId) + 1;
-  return { ...mine, medianPoints: stats.medianPoints, medianJobs: stats.medianJobs, poolSize: ranked.length, rank };
+  return { ...mine, scope, medianPoints: stats.medianPoints, medianJobs: stats.medianJobs, poolSize: ranked.length, rank };
 }
 
 /* ------------------------------------------------------------------ */

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "@/db";
 import {
@@ -44,7 +44,11 @@ export type TaskStatusFilter = TaskStatus | "open" | "overdue" | "closed";
 export type TaskFilters = {
   /** A chair id, or "general" for tasks with no chair. */
   chairId?: number | "general";
+  /** Only tasks on these chairs' boards; an empty list matches nothing. */
+  chairIds?: number[];
   assigneeId?: number;
+  /** Only tasks nobody is assigned to. */
+  unassigned?: boolean;
   createdById?: number;
   status?: TaskStatusFilter;
   priority?: TaskPriority;
@@ -71,9 +75,11 @@ function whereFor(filters: TaskFilters, nowIso: string): SQL | undefined {
   const conds: (SQL | undefined)[] = [];
   if (filters.chairId === "general") conds.push(isNull(tasks.chairId));
   else if (typeof filters.chairId === "number") conds.push(eq(tasks.chairId, filters.chairId));
+  if (filters.chairIds) conds.push(filters.chairIds.length ? inArray(tasks.chairId, filters.chairIds) : sql`0`);
   if (filters.assigneeId != null) {
     conds.push(inArray(tasks.id, db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.memberId, filters.assigneeId))));
   }
+  if (filters.unassigned) conds.push(notInArray(tasks.id, db.select({ id: taskAssignees.taskId }).from(taskAssignees)));
   if (filters.createdById != null) conds.push(eq(tasks.createdById, filters.createdById));
   switch (filters.status) {
     case undefined:
@@ -242,6 +248,39 @@ export function countOpenTasksForMember(memberId: number): number {
       and(
         inArray(tasks.status, [...OPEN_STATUSES]),
         inArray(tasks.id, db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.memberId, memberId))),
+      ),
+    )
+    .get();
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * Open tasks on the given chairs' boards that nobody is assigned to, overdue first then by due date.
+ * For a chair holder's "On my boards" section on the Mine tab and the dashboard: pass `user.chairIds`.
+ * Extra filters narrow the list (the status defaults to open); an empty id list returns nothing.
+ */
+export function getUnassignedBoardTasks(
+  chairIds: readonly number[],
+  filters: Pick<TaskFilters, "status" | "priority" | "q" | "limit"> = {},
+  now: Date = new Date(),
+): TaskListItem[] {
+  const ids = [...new Set(chairIds)];
+  if (ids.length === 0) return [];
+  return listTasks({ status: "open", ...filters, chairIds: ids, unassigned: true }, now);
+}
+
+/** Number of open, unassigned tasks on the given chairs' boards (for the Mine tab counts). */
+export function countUnassignedBoardTasks(chairIds: readonly number[]): number {
+  const ids = [...new Set(chairIds)];
+  if (ids.length === 0) return 0;
+  const row = db
+    .select({ n: sql<number>`count(*)` })
+    .from(tasks)
+    .where(
+      and(
+        inArray(tasks.status, [...OPEN_STATUSES]),
+        inArray(tasks.chairId, ids),
+        notInArray(tasks.id, db.select({ id: taskAssignees.taskId }).from(taskAssignees)),
       ),
     )
     .get();

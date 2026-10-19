@@ -7,6 +7,7 @@
  * sends any non-open status back to open.
  */
 import type { SanctionStatus } from "@/db/schema";
+import { todayISO, toHouseDate } from "@/lib/dates";
 
 /** Settings key holding the posted standards policy text. */
 export const SANCTIONS_POLICY_KEY = "sanctions_policy";
@@ -276,6 +277,89 @@ export function summarizeJobs(list: readonly SanctionLike[]): JobSummary[] {
     if (a.total !== b.total) return b.total - a.total;
     return a.job.localeCompare(b.job);
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* House board (what every brother may see)                            */
+/* ------------------------------------------------------------------ */
+
+/** First day of the current semester: Jul 1 for fall (Jul to Dec), Jan 1 for spring (Jan to Jun). */
+export function semesterStart(today: string): string {
+  const month = Number(today.slice(5, 7));
+  return `${today.slice(0, 4)}-${month >= 7 ? "07" : "01"}-01`;
+}
+
+export type HouseBoardInput = SanctionLike & { completedAt?: string | null; verifiedAt?: string | null; updatedAt?: string | null };
+
+/** A row on the house board: only what the whole house may see. No notes, appeal text, fine or source. */
+export type HouseBoardRow = {
+  id: number;
+  memberId: number;
+  memberName: string | null;
+  /** The punishment job, or the reason when the sanction has no job. */
+  job: string;
+  hasJob: boolean;
+  dueAt: string | null;
+  status: SanctionStatus;
+  overdue: boolean;
+  /** When it was done (verified, else completed); null while it is still outstanding. */
+  doneAt: string | null;
+};
+
+export type HouseBoardCounts = {
+  /** open, in progress or appealed */
+  open: number;
+  overdue: number;
+  /** distinct brothers with something open */
+  brothersOpen: number;
+  doneThisSemester: number;
+};
+
+export type HouseBoard = { open: HouseBoardRow[]; done: HouseBoardRow[]; counts: HouseBoardCounts };
+
+function toHouseBoardRow(s: HouseBoardInput, now: Date): HouseBoardRow {
+  const job = (s.jobDescription ?? "").trim();
+  const doneAt = s.status === "verified" ? (s.verifiedAt ?? s.completedAt ?? s.updatedAt ?? null) : s.status === "completed" ? (s.completedAt ?? s.updatedAt ?? null) : null;
+  return {
+    id: s.id,
+    memberId: s.memberId,
+    memberName: s.memberName ?? null,
+    job: job || s.reason,
+    hasJob: job.length > 0,
+    dueAt: s.dueAt ?? null,
+    status: s.status,
+    overdue: isOverdue(s, now),
+    doneAt,
+  };
+}
+
+/**
+ * "What punishment jobs there are, who needs to do them and how many have been done": every outstanding sanction
+ * (soonest due first) and the ones completed or verified this semester (newest first). Waived sanctions are left out.
+ */
+export function houseBoard(list: readonly HouseBoardInput[], now: Date = new Date()): HouseBoard {
+  const since = semesterStart(todayISO(now));
+  const open = sortSanctions(list.filter((s) => isOutstanding(s))).map((s) => toHouseBoardRow(s, now));
+  const done = list
+    .filter((s) => s.status === "completed" || s.status === "verified")
+    .map((s) => toHouseBoardRow(s, now))
+    .filter((r) => r.doneAt != null && toHouseDate(r.doneAt) >= since)
+    .sort((a, b) => {
+      const da = a.doneAt ?? "";
+      const db = b.doneAt ?? "";
+      if (da !== db) return da > db ? -1 : 1;
+      return b.id - a.id;
+    });
+  return {
+    open,
+    done,
+    counts: {
+      open: open.length,
+      overdue: open.filter((r) => r.overdue).length,
+      brothersOpen: new Set(open.map((r) => r.memberId)).size,
+      doneThisSemester: done.length,
+    },
+  };
 }
 
 /** Append an appeal reason to existing notes, dated, without losing what was there. */

@@ -4,13 +4,18 @@ import {
   centsToCsv,
   computeBalance,
   csvEscape,
+  dueItemLabel,
+  dueItemsFor,
+  dueLineParts,
   earliestUnpaidDue,
   inPeriod,
   memberStatus,
   nextInstallment,
+  outstandingCharges,
   overallStatus,
   parseInstallments,
   parseInstallmentsJson,
+  sortDueItems,
   statusTone,
   toCsv,
 } from "./dues-logic";
@@ -92,6 +97,70 @@ describe("earliestUnpaidDue", () => {
   it("counts credits toward the oldest charge", () => {
     const charges = [{ amountCents: 100, dueDate: "2026-01-01" }, { amountCents: -100, dueDate: null }];
     expect(earliestUnpaidDue(charges, 0)).toBeNull();
+  });
+});
+
+describe("outstandingCharges and due items", () => {
+  const fine = { amountCents: 2500, periodId: 1, dueDate: "2026-10-23", kind: "fine", description: "Fine: Missed clean" };
+  const dues = { amountCents: 85000, periodId: 1, dueDate: "2026-11-01", kind: "dues", description: "Fall 2026 dues" };
+  const social = { amountCents: 3000, periodId: 1, dueDate: null, kind: "social", description: "Formal ticket" };
+  const credit = { amountCents: -5000, periodId: 1, dueDate: null, kind: "credit", description: "Cooked for rush" };
+
+  it("lists the charges not yet covered, in due-date order, with what is left on each", () => {
+    expect(outstandingCharges([dues, social, fine], 0)).toEqual([
+      { charge: fine, remainingCents: 2500 },
+      { charge: dues, remainingCents: 85000 },
+      { charge: social, remainingCents: 3000 },
+    ]);
+    // The $50 credit covers the fine (due first) and the rest goes against the dues.
+    expect(outstandingCharges([dues, social, fine, credit], 0)).toEqual([
+      { charge: dues, remainingCents: 82500 },
+      { charge: social, remainingCents: 3000 },
+    ]);
+    // $400 paid on top: the dues are partly paid, the undated ticket is untouched.
+    expect(outstandingCharges([dues, social, fine, credit], 40000)).toEqual([
+      { charge: dues, remainingCents: 42500 },
+      { charge: social, remainingCents: 3000 },
+    ]);
+    expect(outstandingCharges([dues, social, fine, credit], 200000)).toEqual([]);
+  });
+
+  it("words fines and late fees by kind and everything else by its description", () => {
+    expect(dueItemLabel(fine)).toBe("fine");
+    expect(dueItemLabel({ kind: "late_fee", description: "Fall 2026 late fee" })).toBe("late fee");
+    expect(dueItemLabel(dues)).toBe("Fall 2026 dues");
+    expect(dueItemLabel(social)).toBe("Formal ticket");
+    expect(dueItemLabel({ kind: "other", description: "  " })).toBe("other");
+  });
+
+  it("turns outstanding charges into due items and sorts them soonest first, undated last", () => {
+    const items = dueItemsFor([dues, social, fine], 0);
+    expect(items).toEqual([
+      { kind: "fine", label: "fine", dueDate: "2026-10-23", remainingCents: 2500, periodId: 1 },
+      { kind: "dues", label: "Fall 2026 dues", dueDate: "2026-11-01", remainingCents: 85000, periodId: 1 },
+      { kind: "social", label: "Formal ticket", dueDate: null, remainingCents: 3000, periodId: 1 },
+    ]);
+    const plan = { kind: "plan", label: "Spring 2026 plan installment", dueDate: "2026-10-30", remainingCents: 20000, periodId: 2 };
+    expect(sortDueItems([items[2], plan, items[1], items[0]]).map((i) => i.label)).toEqual(["fine", "Spring 2026 plan installment", "Fall 2026 dues", "Formal ticket"]);
+  });
+
+  it("writes the headline parts: a fine due before the dues is named as a fine", () => {
+    const items = dueItemsFor([{ ...dues, amountCents: 45000 }, fine], 0);
+    expect(dueLineParts(items, TODAY)).toEqual(["$25.00 fine due Oct 23", "$450.00 Fall 2026 dues due Nov 1"]);
+    expect(dueLineParts(items, TODAY).join(" · ")).toBe("$25.00 fine due Oct 23 · $450.00 Fall 2026 dues due Nov 1");
+  });
+
+  it("adds the year for dates outside this year, skips 'due' for undated items and collapses the tail", () => {
+    const plan = { kind: "plan", label: "Fall 2026 plan installment", dueDate: "2027-01-15", remainingCents: 20000, periodId: 1 };
+    const items = [...dueItemsFor([dues, social, fine], 0), plan];
+    expect(dueLineParts(items, TODAY, 2)).toEqual(["$25.00 fine due Oct 23", "$850.00 Fall 2026 dues due Nov 1", "2 more"]);
+    expect(dueLineParts(sortDueItems(items), TODAY, 4)).toEqual([
+      "$25.00 fine due Oct 23",
+      "$850.00 Fall 2026 dues due Nov 1",
+      "$200.00 Fall 2026 plan installment due Jan 15, 2027",
+      "$30.00 Formal ticket",
+    ]);
+    expect(dueLineParts([], TODAY)).toEqual([]);
   });
 });
 
@@ -284,6 +353,40 @@ describe("buildLedger", () => {
     expect(ledger[1]).toMatchObject({ deltaCents: -40000, label: "Payment", detail: "venmo #123" });
     expect(ledger[3].detail).toBe("cash");
     expect(ledger[0].dueDate).toBe("2026-11-01");
+  });
+  it("keeps a same-day payment after that day's charges, whatever the clock times say", () => {
+    // Billed at 9:00 EDT and fined at 15:30 EDT on Oct 18; the payment is dated Oct 18 but stored at house noon,
+    // so by raw instant it would sort between the two charges and the fine row would show a negative balance after it.
+    const charges = [
+      { id: 1, amountCents: 85000, periodId: 1, dueDate: "2026-11-01", createdAt: "2026-10-18T13:00:00.000Z", kind: "dues", description: "Fall 2026 dues" },
+      { id: 2, amountCents: 2500, periodId: 1, dueDate: "2026-10-23", createdAt: "2026-10-18T19:30:00.000Z", kind: "fine", description: "Fine: Missed clean" },
+    ];
+    const payments = [{ id: 7, amountCents: 40000, periodId: 1, paidAt: "2026-10-18T16:00:00.000Z", method: "venmo", reference: null, createdAt: "2026-10-18T19:45:00.000Z" }];
+    const ledger = buildLedger(charges, payments);
+    expect(ledger.map((e) => `${e.type}:${e.id}`)).toEqual(["charge:1", "charge:2", "payment:7"]);
+    expect(ledger.map((e) => e.runningBalanceCents)).toEqual([85000, 87500, 47500]);
+    expect(ledger.every((e) => e.runningBalanceCents >= 0)).toBe(true);
+    expect(ledger.map((e) => e.date)).toEqual(["2026-10-18", "2026-10-18", "2026-10-18"]);
+  });
+  it("orders by the house calendar date, not the UTC date", () => {
+    // 23:30 EDT on Oct 18 is 03:30Z on Oct 19: still Oct 18 in the house, so a payment dated Oct 19 comes after it.
+    const charges = [{ id: 1, amountCents: 1000, periodId: null, dueDate: null, createdAt: "2026-10-19T03:30:00.000Z", kind: "damage", description: "Broken chair" }];
+    const payments = [{ id: 2, amountCents: 1000, periodId: null, paidAt: "2026-10-19T16:00:00.000Z", method: "cash", reference: null }];
+    const ledger = buildLedger(charges, payments);
+    expect(ledger.map((e) => e.date)).toEqual(["2026-10-18", "2026-10-19"]);
+    expect(ledger.map((e) => e.runningBalanceCents)).toEqual([1000, 0]);
+    // The same payment dated Oct 18 (noon house time) still follows the charge recorded late that evening.
+    const sameDay = buildLedger(charges, [{ ...payments[0], paidAt: "2026-10-18T16:00:00.000Z" }]);
+    expect(sameDay.map((e) => `${e.type}:${e.id}`)).toEqual(["charge:1", "payment:2"]);
+  });
+  it("breaks same-day ties among payments by when they were recorded, then id", () => {
+    const payments = [
+      { id: 9, amountCents: 100, periodId: 1, paidAt: "2026-10-18T16:00:00.000Z", method: "cash", reference: null, createdAt: "2026-10-18T20:00:00.000Z" },
+      { id: 8, amountCents: 200, periodId: 1, paidAt: "2026-10-18T16:00:00.000Z", method: "venmo", reference: null, createdAt: "2026-10-18T21:00:00.000Z" },
+      { id: 3, amountCents: 300, periodId: 1, paidAt: "2026-10-18T16:00:00.000Z", method: "zelle", reference: null },
+      { id: 2, amountCents: 400, periodId: 1, paidAt: "2026-10-18T16:00:00.000Z", method: "zelle", reference: null },
+    ];
+    expect(buildLedger([], payments).map((e) => e.id)).toEqual([2, 3, 9, 8]);
   });
   it("handles an empty ledger", () => {
     expect(buildLedger([], [])).toEqual([]);

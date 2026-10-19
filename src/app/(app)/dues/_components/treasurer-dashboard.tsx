@@ -146,7 +146,8 @@ export function TreasurerDashboard({
                 Clear
               </ButtonLink>
             ) : null}
-            <span className="ml-auto text-sm text-muted">
+            {/* Counts what the list below shows (after the status, class and search filters), out of every current member. */}
+            <span className="ml-auto text-sm text-muted" data-testid="member-count">
               {filtered.length} of {rows.length} brothers
             </span>
           </form>

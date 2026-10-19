@@ -9,6 +9,8 @@ import {
   groupChairsByCategory,
   isValidChairSlug,
   isValidUsername,
+  membersMissingClass,
+  missingContactFields,
   normalizeUsername,
   parseResponsibilities,
   parseRosterParams,
@@ -196,6 +198,40 @@ describe("rosterSummary", () => {
   it("formats a one-line summary", () => {
     expect(formatRosterSummary(rosterSummary(rows))).toBe("2 active, 1 new member, 1 abroad, 1 inactive, 1 alumni · Psi 2, Omega 2, Beta Beta 1, No class 1 · 2 cooks, 2 cleans");
     expect(formatRosterSummary(rosterSummary([]))).toBe("0 active · 0 cooks, 0 cleans");
+  });
+});
+
+describe("membersMissingClass", () => {
+  it("lists brothers on the default roster who have no pledge class, in input order", () => {
+    const rows = [
+      row({ id: 1, pledgeClassId: 3 }),
+      row({ id: 2, pledgeClassId: null }),
+      row({ id: 3, pledgeClassId: null, status: "new_member" }),
+      row({ id: 4, pledgeClassId: null, status: "abroad" }),
+    ];
+    expect(membersMissingClass(rows).map((m) => m.id)).toEqual([2, 3, 4]);
+  });
+  it("ignores inactive and alumni brothers, who are hidden from the roster anyway", () => {
+    const rows = [row({ id: 5, pledgeClassId: null, status: "alumni" }), row({ id: 6, pledgeClassId: null, status: "inactive" })];
+    expect(membersMissingClass(rows)).toEqual([]);
+    expect(membersMissingClass([])).toEqual([]);
+  });
+});
+
+describe("missingContactFields", () => {
+  it("reports blank phone, email and room in display order", () => {
+    expect(missingContactFields({ phone: null, email: null, room: null })).toEqual(["phone", "email", "room"]);
+    expect(missingContactFields({ phone: "617-555-0100", email: null, room: "3B" })).toEqual(["email"]);
+    expect(missingContactFields({ phone: "617-555-0100", email: "gio@mit.edu", room: "3B" })).toEqual([]);
+  });
+  it("treats whitespace as blank", () => {
+    expect(missingContactFields({ phone: "  ", email: "\t", room: " ", livesInHouse: true })).toEqual(["phone", "email", "room"]);
+  });
+  it("does not expect a room from a brother who lives out of the house", () => {
+    expect(missingContactFields({ phone: "617-555-0100", email: "gio@mit.edu", room: null, livesInHouse: false })).toEqual([]);
+    expect(missingContactFields({ phone: null, email: null, room: null, livesInHouse: false })).toEqual(["phone", "email"]);
+    // Unknown living situation (the field was not loaded): assume they live in and ask for the room.
+    expect(missingContactFields({ phone: "617-555-0100", email: "gio@mit.edu", room: null })).toEqual(["room"]);
   });
 });
 

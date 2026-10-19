@@ -1,21 +1,23 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { canManageChair } from "@/lib/permissions";
+import { canManageChair, type CurrentUser } from "@/lib/permissions";
 import { displayName } from "@/lib/names";
 import { groupByPledgeClass, listMembers } from "@/lib/queries/common";
 import {
   countOpenTasks,
   countOpenTasksForMember,
+  countUnassignedBoardTasks,
   getPerson,
   getTaskCountsByChair,
+  getUnassignedBoardTasks,
   listChairSummaries,
   listTasks,
   type ChairSummary,
   type TaskListItem,
   type TaskPerson,
 } from "@/lib/queries/tasks";
-import { canActOnTask, isOverdue } from "@/lib/queries/tasks-logic";
+import { boardChairIds, canActOnTask, isOverdue, mineCountsLabel } from "@/lib/queries/tasks-logic";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -39,8 +41,9 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     members: g.members.map(toPerson),
   }));
 
+  const assignedCount = countOpenTasksForMember(user.id);
   const tabs = [
-    { href: tabHref("mine", filters), label: "Mine", count: countOpenTasksForMember(user.id) },
+    { href: tabHref("mine", filters), label: "Mine", count: assignedCount },
     { href: tabHref("open", filters), label: "Open", count: countOpenTasks() },
     { href: tabHref("chair", filters), label: "By chair" },
     { href: tabHref("done", filters), label: "Done" },
@@ -79,7 +82,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
         </p>
       ) : null}
 
-      {filters.tab === "mine" ? <MineTab user={user} filters={filters} now={now} actionable={actionable} /> : null}
+      {filters.tab === "mine" ? <MineTab user={user} assignedCount={assignedCount} filters={filters} now={now} actionable={actionable} /> : null}
       {filters.tab === "open" ? <OpenTab filters={filters} now={now} actionable={actionable} /> : null}
       {filters.tab === "chair" ? <ByChairTab user={user} filters={filters} now={now} actionable={actionable} chairs={chairs} /> : null}
       {filters.tab === "done" ? <DoneTab filters={filters} now={now} actionable={actionable} /> : null}
@@ -106,18 +109,30 @@ function isClosedFilter(f: ParsedFilters): boolean {
   return f.status === "done" || f.status === "cancelled" || f.status === "closed";
 }
 
-function MineTab({ user, filters, now, actionable }: TabProps & { user: { id: number } }) {
+function MineTab({ user, assignedCount, filters, now, actionable }: TabProps & { user: Pick<CurrentUser, "id" | "chairIds">; assignedCount: number }) {
   const open = listTasks({ ...commonFilters(filters), assigneeId: user.id, status: filters.status ?? "open" }, now);
   const showRecent = !filters.status;
   const recent = showRecent ? listTasks({ ...commonFilters(filters), assigneeId: user.id, status: "closed", order: "completed", limit: 10 }, now) : [];
   const overdue = open.filter((t) => isOverdue(t, now)).length;
   const weekEnd = now.getTime() + 7 * 86_400_000;
   const dueThisWeek = open.filter((t) => t.dueAt && Date.parse(t.dueAt) <= weekEnd && !isOverdue(t, now)).length;
+  // Chair holders also see what sits unowned on their own boards, counted apart from what is assigned to them.
+  const holdsChairs = user.chairIds.length > 0;
+  const boards = holdsChairs
+    ? getUnassignedBoardTasks(boardChairIds(user.chairIds, filters.chairId), { priority: filters.priority, q: filters.q, status: filters.status ?? "open" }, now)
+    : [];
+  const boardsCount = holdsChairs ? countUnassignedBoardTasks(user.chairIds) : 0;
+  const variant = isClosedFilter(filters) ? "done" : "open";
   return (
     <div className="space-y-6">
+      {holdsChairs ? (
+        <p className="text-sm text-muted" data-testid="mine-counts">
+          {mineCountsLabel(assignedCount, boardsCount)}
+        </p>
+      ) : null}
       {!filters.active ? (
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          <Stat label="Open" value={open.length} />
+          <Stat label="Assigned" value={open.length} />
           <Stat label="Overdue" value={overdue} tone={overdue > 0 ? "danger" : undefined} />
           <Stat label="Due in 7 days" value={dueThisWeek} tone={dueThisWeek > 0 ? "warning" : undefined} />
         </div>
@@ -133,8 +148,25 @@ function MineTab({ user, filters, now, actionable }: TabProps & { user: { id: nu
           }
         />
       ) : (
-        <TaskList tasks={open} actionableIds={actionable(open)} variant={isClosedFilter(filters) ? "done" : "open"} now={now} />
+        <TaskList tasks={open} actionableIds={actionable(open)} variant={variant} now={now} />
       )}
+      {holdsChairs ? (
+        <section data-testid="my-boards">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">On my boards (unassigned)</h2>
+            <p className="text-xs text-muted">Open tasks on chairs you hold that nobody owns yet. Assign them, or mark them done yourself.</p>
+          </div>
+          {boards.length === 0 ? (
+            <EmptyState
+              className="py-6"
+              title={filters.active ? "Nothing unassigned matches these filters" : "Every task on your boards has an owner"}
+              description={filters.active ? undefined : "New tasks you create without assignees will wait here."}
+            />
+          ) : (
+            <TaskList tasks={boards} actionableIds={actionable(boards)} variant={variant} now={now} />
+          )}
+        </section>
+      ) : null}
       {recent.length > 0 ? (
         <section>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">Recently finished</h2>

@@ -92,7 +92,7 @@ export default async function BrotherLaborPage({ params }: { params: Promise<{ m
                       <span className="font-medium">{a.jobType.name}</span>
                       <span className="text-muted">
                         {a.jobType.windowLabel ? `${a.jobType.windowLabel} · ` : ""}due {formatDate(a.dueDate, { weekday: true })}
-                        {a.status === "assigned" && a.state !== "not_tracked" ? ` (${dueDescription(a.dueDate)})` : ""}
+                        {a.status === "assigned" && a.state !== "not_tracked" ? ` · (${dueDescription(a.dueDate)})` : ""}
                       </span>
                       <AssignmentStatePill state={a.state} />
                       {a.verifiedBy ? <span className="text-xs text-muted">verified by {a.verifiedBy.preferredName}</span> : null}

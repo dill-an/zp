@@ -24,6 +24,11 @@ export function WeekManageBar({ grid }: { grid: WeekGrid }) {
         </ButtonLink>
       </CardHeader>
       <CardContent className="space-y-3">
+        {!week.isPublished ? (
+          <p role="status" className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-warning" data-testid="draft-notice">
+            <span className="font-medium">Draft: review the schedule, then Publish.</span> Brothers cannot see this week until it is posted.
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <ActionForm action={autoFillWeek} hidden={{ weekId: week.id }} showSuccess>
             <SubmitButton size="sm" pendingText="Filling…">

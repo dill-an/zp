@@ -147,6 +147,36 @@ export function filterRoster<T extends RosterRowLike>(rows: T[], params: RosterP
   });
 }
 
+/**
+ * Brothers who belong on the default roster (not inactive or alumni) but have no pledge class.
+ * A data hygiene list for members.manage; the seed ships one such brother.
+ */
+export function membersMissingClass<T extends { pledgeClassId: number | null; status: MemberStatus }>(rows: readonly T[]): T[] {
+  return rows.filter((m) => m.pledgeClassId == null && !HIDDEN_BY_DEFAULT.includes(m.status));
+}
+
+/* ------------------------------------------------------------------ */
+/* Contact details                                                     */
+/* ------------------------------------------------------------------ */
+
+export type ContactField = "phone" | "email" | "room";
+
+export const CONTACT_FIELD_LABELS: Record<ContactField, string> = { phone: "phone number", email: "email address", room: "room" };
+
+/**
+ * Contact details a brother has left blank, in display order (phone, email, room).
+ * Whitespace counts as blank. A room is only expected from brothers who live in the house, so when
+ * `livesInHouse` is false a missing room is not reported. Empty when everything is filled in.
+ */
+export function missingContactFields(member: { phone: string | null; email: string | null; room: string | null; livesInHouse?: boolean }): ContactField[] {
+  const blank = (v: string | null | undefined) => v == null || v.trim().length === 0;
+  const out: ContactField[] = [];
+  if (blank(member.phone)) out.push("phone");
+  if (blank(member.email)) out.push("email");
+  if (member.livesInHouse !== false && blank(member.room)) out.push("room");
+  return out;
+}
+
 export type RosterSummary = {
   total: number;
   active: number;

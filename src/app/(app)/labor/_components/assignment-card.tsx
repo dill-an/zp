@@ -45,7 +45,12 @@ export function AssignmentCard({
           {showWeek ? `Week of ${formatDate(a.weekStart)} · ` : ""}
           {a.jobType.windowLabel ? `${a.jobType.windowLabel} · ` : ""}
           due {formatDate(a.dueDate, { weekday: true })}
-          {open && tracked ? <span className={cn("ml-1", urgent ? "font-medium text-danger" : "")}>({dueDescription(a.dueDate)})</span> : null}
+          {open && tracked ? (
+            <>
+              {" · "}
+              <span className={cn(urgent ? "font-medium text-danger" : "")}>({dueDescription(a.dueDate)})</span>
+            </>
+          ) : null}
           {a.completedAt ? ` · done ${formatDate(a.completedAt)}` : ""}
           {a.verifiedBy ? ` · verified by ${a.verifiedBy.preferredName}` : ""}
         </p>

@@ -1,8 +1,8 @@
 import { ButtonLink, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState, Table, TBody, Td, Th, THead, Tr } from "@/components/ui";
-import { dueDescription, formatDate } from "@/lib/dates";
+import { dueDescription, formatDate, todayISO } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
-import { getActivePeriod, getMemberBalance, getMemberLedger, getMemberPeriodRows } from "@/lib/queries/dues";
-import { statusTone } from "@/lib/queries/dues-logic";
+import { getActivePeriod, getMemberBalance, getMemberDueItems, getMemberLedger, getMemberPeriodRows } from "@/lib/queries/dues";
+import { dueLineParts, statusTone } from "@/lib/queries/dues-logic";
 import { getSetting, SETTING_KEYS } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import { methodLabel } from "./constants";
@@ -27,14 +27,19 @@ export function MyDues({ memberId }: { memberId: number }) {
 
   const headline =
     balance.balanceCents > 0 ? "You owe" : balance.balanceCents < 0 ? "Credit on your account" : balance.status === "none" ? "Nothing billed yet" : "All paid up";
+  // What is owed, item by item ("$25.00 fine due Oct 23 · $450.00 Fall 2026 dues due Nov 1"), so a fine that is due
+  // before the dues is named as a fine instead of its date reading as the dues due date.
+  const dueItems = balance.balanceCents > 0 ? getMemberDueItems(memberId) : [];
+  const dueParts = dueLineParts(dueItems, todayISO());
+  const firstDue = dueItems[0]?.dueDate ?? null;
   const dueLine =
-    balance.balanceCents > 0 && balance.nextDueDate
-      ? `Due ${formatDate(balance.nextDueDate, { year: true })} (${dueDescription(balance.nextDueDate)})`
-      : balance.balanceCents > 0
-        ? "No due date set"
-        : balance.status === "none"
-          ? "The treasurer has not billed you for anything."
-          : "Nothing outstanding.";
+    balance.balanceCents > 0
+      ? dueParts.length > 0
+        ? dueParts.map((part, i) => (i === 0 && firstDue ? `${part} (${dueDescription(firstDue)})` : part)).join(" · ")
+        : "No due date set"
+      : balance.status === "none"
+        ? "The treasurer has not billed you for anything."
+        : "Nothing outstanding.";
 
   return (
     <div className="space-y-4">
@@ -46,7 +51,9 @@ export function MyDues({ memberId }: { memberId: number }) {
               <p className={cn("mt-1 text-4xl font-semibold tabular-nums", tone ? TONE_TEXT[tone] : "")} data-testid="my-balance">
                 {formatCents(Math.abs(balance.balanceCents))}
               </p>
-              <p className={cn("mt-1 text-sm", balance.status === "overdue" ? "text-danger font-medium" : "text-muted")}>{dueLine}</p>
+              <p className={cn("mt-1 text-sm", balance.status === "overdue" ? "text-danger font-medium" : "text-muted")} data-testid="my-due-line">
+                {dueLine}
+              </p>
             </div>
             <DuesStatusPill status={balance.status} className="text-sm" />
           </div>

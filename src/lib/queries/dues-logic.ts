@@ -2,7 +2,8 @@
  * Pure dues logic: balances, statuses, payment plan installments, CSV helpers.
  * No database access so it can be unit tested.
  */
-import { parseDollarsToCents } from "@/lib/money";
+import { formatDate, toHouseDate } from "@/lib/dates";
+import { formatCents, parseDollarsToCents } from "@/lib/money";
 
 export const DUES_STATUSES = ["paid", "partial", "unpaid", "overdue", "none"] as const;
 export type DuesStatus = (typeof DUES_STATUSES)[number];
@@ -40,22 +41,90 @@ function compareDueDates(a: string | null | undefined, b: string | null | undefi
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+export type Outstanding<T extends ChargeLike> = { charge: T; remainingCents: number };
+
 /**
  * Payments and credits (negative charges) are applied to positive charges in due-date order (earliest first,
- * undated last). Returns the due date of the first charge that is not fully covered, or null.
+ * undated last). Returns the charges that are not fully covered, each with what is still owed on it.
  */
-export function earliestUnpaidDue(charges: ChargeLike[], paidCents: number): string | null {
+export function outstandingCharges<T extends ChargeLike>(charges: readonly T[], paidCents: number): Outstanding<T>[] {
   const credits = charges.filter((c) => c.amountCents < 0).reduce((total, c) => total - c.amountCents, 0);
   let available = paidCents + credits;
   const owed = charges.filter((c) => c.amountCents > 0).sort((a, b) => compareDueDates(a.dueDate, b.dueDate));
+  const out: Outstanding<T>[] = [];
   for (const charge of owed) {
     if (available >= charge.amountCents) {
       available -= charge.amountCents;
       continue;
     }
-    return charge.dueDate ?? null;
+    out.push({ charge, remainingCents: charge.amountCents - available });
+    available = 0;
   }
-  return null;
+  return out;
+}
+
+/** Due date of the first charge that is not fully covered (see outstandingCharges), or null. */
+export function earliestUnpaidDue(charges: ChargeLike[], paidCents: number): string | null {
+  return outstandingCharges(charges, paidCents)[0]?.charge.dueDate ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* "You owe" line                                                       */
+/* ------------------------------------------------------------------ */
+
+/** One thing a brother still has to pay: what is left on a charge, or the next installment of an approved plan. */
+export type DueItem = {
+  /** Charge kind ("dues", "fine", ...) or "plan" for a payment plan installment. */
+  kind: string;
+  /** Short wording for the headline: "fine", "late fee", "Fall 2026 dues", "Fall 2026 plan installment". */
+  label: string;
+  dueDate: string | null;
+  remainingCents: number;
+  periodId: number | null;
+};
+
+/** Headline wording for a charge: fines and late fees by kind, everything else by its own description. */
+export function dueItemLabel(charge: { kind: string; description: string }): string {
+  switch (charge.kind) {
+    case "fine":
+      return "fine";
+    case "late_fee":
+      return "late fee";
+    default:
+      return charge.description.trim() || charge.kind;
+  }
+}
+
+/** Outstanding charges of one scope as due items (same allocation as earliestUnpaidDue). */
+export function dueItemsFor<T extends ChargeLike & { kind: string; description: string }>(charges: readonly T[], paidCents: number): DueItem[] {
+  return outstandingCharges(charges, paidCents).map(({ charge, remainingCents }) => ({
+    kind: charge.kind,
+    label: dueItemLabel(charge),
+    dueDate: charge.dueDate ?? null,
+    remainingCents,
+    periodId: charge.periodId ?? null,
+  }));
+}
+
+/** Soonest due first, undated last; ties keep their order. */
+export function sortDueItems(items: readonly DueItem[]): DueItem[] {
+  return [...items].sort((a, b) => compareDueDates(a.dueDate, b.dueDate));
+}
+
+/**
+ * Pieces of the "You owe" line, one per due item: "$25.00 fine due Oct 23", "$450.00 Fall 2026 dues due Nov 1".
+ * Dates outside the current year get the year. At most `max` items; the rest collapse into "2 more".
+ */
+export function dueLineParts(items: readonly DueItem[], today: string, max = 3): string[] {
+  const shown = items.slice(0, max);
+  const parts = shown.map((item) => {
+    const amount = formatCents(item.remainingCents);
+    if (!item.dueDate) return `${amount} ${item.label}`;
+    return `${amount} ${item.label} due ${formatDate(item.dueDate, { year: item.dueDate.slice(0, 4) !== today.slice(0, 4) })}`;
+  });
+  const more = items.length - shown.length;
+  if (more > 0) parts.push(`${more} more`);
+  return parts;
 }
 
 /** Balance for one member: sum(charges) - sum(payments), optionally restricted to a period. */
@@ -229,13 +298,15 @@ function dollars(cents: number): string {
 /* ------------------------------------------------------------------ */
 
 export type LedgerCharge = { id: number; amountCents: number; periodId: number | null; dueDate: string | null; createdAt: string; kind: string; description: string };
-export type LedgerPayment = { id: number; amountCents: number; periodId: number | null; paidAt: string; method: string; reference: string | null };
+export type LedgerPayment = { id: number; amountCents: number; periodId: number | null; paidAt: string; method: string; reference: string | null; createdAt?: string };
 
 export type LedgerEntry = {
   type: "charge" | "payment";
   id: number;
-  /** ISO instant used for ordering (charge createdAt or payment paidAt). */
+  /** ISO instant the row is dated (charge createdAt or payment paidAt). */
   at: string;
+  /** House calendar date ("YYYY-MM-DD") of `at`; the ledger is ordered by this first. */
+  date: string;
   periodId: number | null;
   /** Positive increases what the member owes; payments are negative. */
   deltaCents: number;
@@ -245,13 +316,21 @@ export type LedgerEntry = {
   dueDate: string | null;
 };
 
-/** Chronological ledger with a running balance. Charges sort before payments at the same instant. */
+/**
+ * Chronological ledger (oldest first) with a running balance. Rows are ordered by house calendar date, then charges
+ * before payments on the same day, then by when the row was recorded, then id. A payment is stored at a fixed time of
+ * its day while a charge keeps the instant it was created, so ordering by the raw instant would put a same-day payment
+ * ahead of the charges it pays for and show a negative balance after it. Callers render it reversed (newest first).
+ */
 export function buildLedger(charges: LedgerCharge[], payments: LedgerPayment[]): LedgerEntry[] {
-  const entries: Omit<LedgerEntry, "runningBalanceCents">[] = [
+  type Pending = Omit<LedgerEntry, "runningBalanceCents"> & { recordedAt: string };
+  const entries: Pending[] = [
     ...charges.map((c) => ({
       type: "charge" as const,
       id: c.id,
       at: c.createdAt,
+      date: toHouseDate(c.createdAt),
+      recordedAt: c.createdAt,
       periodId: c.periodId ?? null,
       deltaCents: c.amountCents,
       label: c.description,
@@ -262,6 +341,8 @@ export function buildLedger(charges: LedgerCharge[], payments: LedgerPayment[]):
       type: "payment" as const,
       id: p.id,
       at: p.paidAt,
+      date: toHouseDate(p.paidAt),
+      recordedAt: p.createdAt ?? p.paidAt,
       periodId: p.periodId ?? null,
       deltaCents: -p.amountCents,
       label: "Payment",
@@ -270,14 +351,15 @@ export function buildLedger(charges: LedgerCharge[], payments: LedgerPayment[]):
     })),
   ];
   entries.sort((a, b) => {
-    if (a.at !== b.at) return a.at < b.at ? -1 : 1;
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
     if (a.type !== b.type) return a.type === "charge" ? -1 : 1;
+    if (a.recordedAt !== b.recordedAt) return a.recordedAt < b.recordedAt ? -1 : 1;
     return a.id - b.id;
   });
   let running = 0;
   return entries.map((e) => {
     running += e.deltaCents;
-    return { ...e, runningBalanceCents: running };
+    return { type: e.type, id: e.id, at: e.at, date: e.date, periodId: e.periodId, deltaCents: e.deltaCents, runningBalanceCents: running, label: e.label, detail: e.detail, dueDate: e.dueDate };
   });
 }
 

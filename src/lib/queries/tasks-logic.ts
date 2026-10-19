@@ -251,3 +251,19 @@ export function diffAssignees(before: readonly number[], after: readonly number[
   const a = new Set(after);
   return { added: [...a].filter((id) => !b.has(id)), removed: [...b].filter((id) => !a.has(id)) };
 }
+
+/**
+ * Chair ids whose boards the Mine tab lists under "On my boards": the chairs the user holds, narrowed to the
+ * chair filter when one is set. A chair the user does not hold, or the General bucket, yields nothing.
+ */
+export function boardChairIds(heldChairIds: readonly number[], chairFilter?: number | "general"): number[] {
+  const held = [...new Set(heldChairIds)];
+  if (chairFilter === undefined) return held;
+  if (chairFilter === "general") return [];
+  return held.includes(chairFilter) ? [chairFilter] : [];
+}
+
+/** Mine tab summary for chair holders, keeping the two counts apart: "3 assigned · 2 on my boards". */
+export function mineCountsLabel(assigned: number, onBoards: number): string {
+  return `${assigned} assigned · ${onBoards} on my boards`;
+}
