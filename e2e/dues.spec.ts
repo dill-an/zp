@@ -1,5 +1,5 @@
 import { test, expect as baseExpect, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { ADMIN, BROTHER, login, uniq } from "./helpers";
+import { ADMIN, BROTHER, CLEANER, login, uniq } from "./helpers";
 
 /**
  * Dues flows. Runs serially: the first test creates a fresh, active period and bills everyone;
@@ -18,6 +18,10 @@ let periodId = "";
 let brotherId = "";
 let adminId = "";
 let newMemberId = "";
+let cleanerId = "";
+/** A second, already past-due period for the late-fee test. */
+const pastPeriodName = uniq("E2E Past Dues");
+let pastPeriodId = "";
 
 let adminCtx: BrowserContext;
 let brotherCtx: BrowserContext;
@@ -92,6 +96,8 @@ test("admin creates an active period at $850 and bills members (preview, then co
   newMemberId = await memberIdFor(page, NEW_MEMBER_NAME);
   expect(newMemberId).not.toBe("");
   await expect(page.getByTestId(`member-row-${newMemberId}`)).toContainText("Nothing due");
+  cleanerId = await memberIdFor(page, CLEANER.name);
+  expect(cleanerId).not.toBe("");
 
   // The admin's own "Full ledger" link gives the admin id for the permission test later.
   const ledgerHref = await page.getByRole("link", { name: "Full ledger" }).getAttribute("href");
@@ -296,6 +302,80 @@ test("editing the period's due date moves the billed dues charges with it", asyn
   const chargeRow = brother.locator("tr", { hasText: `${periodName} dues` });
   await expect(chargeRow).toBeVisible();
   await expect(chargeRow).toContainText("Dec 15");
+});
+
+test("late fees skip a brother whose approved payment plan is not late yet", async () => {
+  // A second, past-due period: everyone billed in it is overdue, except the brother once he is on an approved plan
+  // whose next installment is still ahead. Late fees must follow that same status, not just "balance > 0".
+  const page = admin;
+  await page.goto("/dues/periods");
+  await page.getByRole("button", { name: "New period" }).click();
+  let dialog = openDialog(page);
+  await dialog.locator("#period-new-name").fill(pastPeriodName);
+  await dialog.locator("#period-new-amount").fill("850");
+  await dialog.locator("#period-new-newMemberAmount").fill("0");
+  await dialog.locator("#period-new-dueDate").fill("2026-10-01");
+  await dialog.locator("#period-new-lateFee").fill("25");
+  await dialog.locator("input[name=isActive]").uncheck();
+  await dialog.getByRole("button", { name: "Create period" }).click();
+  await expect(dialog).toHaveCount(0);
+  const row = page.locator("tr", { hasText: pastPeriodName }).first();
+  const billHref = await row.getByRole("link", { name: "Bill members" }).getAttribute("href");
+  pastPeriodId = billHref?.match(/periods\/(\d+)\/bill/)?.[1] ?? "";
+  expect(pastPeriodId).not.toBe("");
+  await page.goto(`/dues/periods/${pastPeriodId}/bill`);
+  await page.getByTestId("run-confirm").click();
+  await page.waitForURL(new RegExp(`/dues\\?period=${pastPeriodId}&billed=\\d+`), { waitUntil: "commit" });
+  await expect(page.getByTestId(`member-row-${brotherId}`)).toContainText("Overdue");
+
+  // Propose a plan with every installment in the future, then approve it.
+  await page.goto(`/dues/members/${brotherId}?period=${pastPeriodId}`);
+  await page.getByRole("button", { name: "Payment plan" }).click();
+  dialog = openDialog(page);
+  await dialog.locator("#plan-period").selectOption(pastPeriodId);
+  const rows: [number, string, string][] = [
+    [1, "2027-01-15", "200"],
+    [2, "2027-02-15", "200"],
+    [3, "2027-03-15", "450"],
+  ];
+  for (const [n, date, amount] of rows) {
+    await dialog.locator(`input[name=due_${n}]`).fill(date);
+    await dialog.locator(`input[name=amount_${n}]`).fill(amount);
+  }
+  await dialog.getByRole("button", { name: "Propose plan" }).click();
+  await expect(dialog).toHaveCount(0);
+  const plan = page.locator("[data-testid^=plan-]", { hasText: pastPeriodName }).first();
+  await expect(plan).toContainText("Proposed");
+  await plan.getByRole("button", { name: "Approve" }).click();
+  await expect(plan).toContainText("Approved");
+  await expect(plan).toContainText("next");
+
+  // The dashboard now calls him unpaid with the installment as the next due date, and the late fee preview agrees.
+  await page.goto(`/dues?period=${pastPeriodId}`);
+  const memberRow = page.getByTestId(`member-row-${brotherId}`);
+  await expect(memberRow).toContainText("Unpaid");
+  await expect(memberRow).toContainText("Jan 15");
+  await expect(memberRow).not.toContainText("Overdue");
+  await page.goto(`/dues/periods/${pastPeriodId}/late-fees`);
+  await expect(page.getByTestId("late-fee-not-yet-due")).toContainText(BROTHER.name);
+  await expect(page.getByTestId("late-fee-not-yet-due")).toContainText("Jan 15");
+  await expect(page.locator("table tr", { hasText: BROTHER.name })).toHaveCount(0);
+  await expect(page.locator("table tr", { hasText: CLEANER.name })).toHaveCount(1);
+  const confirm = page.getByTestId("run-confirm");
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await page.waitForURL(new RegExp(`/dues\\?period=${pastPeriodId}&status=overdue&latefees=\\d+`), { waitUntil: "commit" });
+  await expect(page.getByTestId("late-fee-notice")).toContainText("Applied late fees");
+  // Overdue filter: the cleaner got his fee, the brother on the plan is not in the list at all.
+  await expect(page.getByTestId(`member-row-${cleanerId}`)).toContainText("Overdue");
+  await expect(page.getByTestId(`member-row-${brotherId}`)).toHaveCount(0);
+  // His ledger for the period has the dues charge only, no late fee.
+  await page.goto(`/dues/members/${brotherId}?period=${pastPeriodId}`);
+  await expect(page.locator("[data-testid^=ledger-charge-]")).toHaveCount(1);
+  await expect(page.getByText(`${pastPeriodName} late fee`)).toHaveCount(0);
+  // Everyone else got exactly one.
+  await page.goto(`/dues/members/${cleanerId}?period=${pastPeriodId}`);
+  await expect(page.locator("tr", { hasText: `${pastPeriodName} late fee` })).toHaveCount(1);
 });
 
 test("mobile viewport renders /dues without horizontal scroll", async () => {

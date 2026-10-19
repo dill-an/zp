@@ -250,6 +250,10 @@ export async function updateMember(_prev: ActionResult | null, formData: FormDat
       const msg = "That username is taken.";
       return fail(msg, { username: [msg] }, valuesOf(formData));
     }
+    // Renaming an admin's login locks them out just like a status change would; only admins may do that.
+    if (username !== existing.username && !canManageMemberAccount(actor.role, existing.role)) {
+      return fail("Only an admin can change another admin's username.", { username: ["Only admins can change this."] }, valuesOf(formData));
+    }
 
     const pc = resolvePledgeClass(d.pledgeClassId);
     if (!pc.ok) return fail(pc.error, { pledgeClassId: [pc.error] }, valuesOf(formData));

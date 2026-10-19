@@ -311,10 +311,24 @@ test("a failed multi-brother submit keeps the toggle and the checked brothers", 
 
 test("Jobs tab groups punishment jobs and does not link the no-job group to an empty search", async ({ page }) => {
   await login(page, ADMIN);
+  // Its own records: one with a job description, one with hours only (no job text at all).
+  const job = uniq("Scrub the walk-in fridge");
+  const jobId = await issue(page, { member: BROTHER.name, reason: uniq("Jobs"), job });
+  const noJobId = await issue(page, { member: BROTHER.name, reason: uniq("HoursOnly"), hours: "1" });
+
   await page.goto("/sanctions?tab=jobs");
   const main = page.locator("main");
-  // sanction1 and sanction3 have job descriptions; sanction4 (hours only) lands in the synthetic group.
-  await expect(main.getByRole("link", { name: "Deep clean the basement bathroom" }).first()).toBeVisible();
+  // A real job links to the board filtered by its text, and that search finds the sanction.
+  const jobLink = main.getByRole("link", { name: job });
+  await expect(jobLink).toHaveAttribute("href", /\/sanctions\?tab=all&q=Scrub/);
+  // The synthetic no-job group is plain text (a q= search for its label would match nothing),
+  // but the brother who still owes it links to the sanction itself.
   await expect(main.getByText("No job (fine or hours only)")).toBeVisible();
   await expect(main.getByRole("link", { name: "No job (fine or hours only)" })).toHaveCount(0);
+  await expect(main.locator(`a[href="/sanctions/${noJobId}"]`)).toBeVisible();
+
+  await jobLink.click();
+  await page.waitForURL(/\/sanctions\?tab=all&q=/);
+  await expect(page.locator(`tr[data-sanction-id="${jobId}"]`)).toBeVisible();
+  await expect(page.locator("tr[data-sanction-id]")).toHaveCount(1);
 });

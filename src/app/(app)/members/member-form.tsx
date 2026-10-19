@@ -50,7 +50,7 @@ export function MemberForm({ member, pledgeClasses, canManage, isAdmin, isSelf, 
   const usernameValue = usernameTouched ? username : suggested;
 
   const targetIsAdmin = member?.role === "admin";
-  /** A non-admin with members.manage may edit an admin's details but not their role or status. */
+  /** A non-admin with members.manage may edit an admin's details but not their role, status or username. */
   const roleLocked = canManage && !isAdmin && targetIsAdmin;
   const roleOptions = isAdmin ? ["member", "officer", "admin"] : ["member", "officer"];
 
@@ -87,7 +87,13 @@ export function MemberForm({ member, pledgeClasses, canManage, isAdmin, isSelf, 
               <Field label="Preferred name" htmlFor="preferredName" hint="Short name used on the labor grid, e.g. Gio or David Coll." error={errors("preferredName")}>
                 <Input id="preferredName" name="preferredName" autoComplete="off" defaultValue={v("preferredName", member?.preferredName)} />
               </Field>
-              <Field label="Username" htmlFor="username" required={!isNew} hint="Lowercase letters, numbers, dots and dashes. Leave blank to use first.last." error={errors("username")}>
+              <Field
+                label="Username"
+                htmlFor="username"
+                required={!isNew}
+                hint={roleLocked ? "Only an admin can change an admin's username." : "Lowercase letters, numbers, dots and dashes. Leave blank to use first.last."}
+                error={errors("username")}
+              >
                 <Input
                   id="username"
                   name="username"
@@ -95,6 +101,7 @@ export function MemberForm({ member, pledgeClasses, canManage, isAdmin, isSelf, 
                   autoCapitalize="none"
                   spellCheck={false}
                   required={!isNew}
+                  readOnly={roleLocked}
                   value={usernameValue}
                   onChange={(e) => {
                     setUsernameTouched(true);
